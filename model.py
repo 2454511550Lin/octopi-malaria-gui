@@ -57,7 +57,7 @@ def generate_predictions(model, device, images, batch_size_inference):
     t0 = time.time()
     for k, (images, labels) in enumerate(dataloader):
         images = images.float().to(device)
-        predictions, _ = model.get_predictions_and_features(images)
+        predictions, _ = model.forward(images)
         predictions = softmax(predictions, dim=1)  # Apply softmax to convert logits to probabilities
         predictions = predictions.detach().cpu().numpy()
         all_predictions.append(predictions)

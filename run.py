@@ -1,7 +1,8 @@
-import multiprocessing as mp
-#import torch.multiprocessing as mp
+#import multiprocessing as mp
+#from multiprocessing import Lock
 
-from multiprocessing import Lock
+import torch.multiprocessing as mp
+from torch.multiprocessing import Lock
 import numpy as np
 from queue import Empty
 from typing import Dict
@@ -10,11 +11,12 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 import base64
 from simulation import get_image
+import threading
+
+
 import cupy as cp
 
 from log import report
-#import torch
-#DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # Existing shared memory managers
 manager = mp.Manager()
@@ -27,6 +29,8 @@ shared_memory_final = manager.dict()
 
 # New shared memory for timing information
 shared_memory_timing = manager.dict()
+
+
 
 # Existing locks
 dpc_lock = manager.Lock()
@@ -173,16 +177,21 @@ def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue):
             continue
 
 from utils import get_spot_images_from_fov
+from model import ResNet, run_model    
 
 def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Queue, save_queue: mp.Queue, ui_queue: mp.Queue):
+
+    import torch
+    DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+
     segmentation_ready = set()
     fluorescent_ready = set()
 
     # initalize model
-    #CHECKPOINT = './checkpoint/resnet18_en/version1/best.pt'
-    #model = ResNet('resnet18').to(device=DEVICE)
-    #model.load_state_dict(torch.load(CHECKPOINT))
-    #model.eval()
+    CHECKPOINT = './checkpoint/resnet18_en/version1/best.pt'
+    model = ResNet('resnet18').to(device=DEVICE)
+    model.load_state_dict(torch.load(CHECKPOINT))
+    model.eval()
 
     while True:
         try:
@@ -217,9 +226,9 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                 cropped_images = cropped_images.transpose(0, 3, 1, 2)
 
                 print(f"Classification Process: got spot images for FOV {fov_id}")
-                #scores = run_model(model,DEVICE,cropped_images,4096)[:,1]
+                scores = run_model(model,DEVICE,cropped_images,4096)[:,1]
                 # random scores
-                scores = np.random.rand(len(spot_list))
+                #scores = np.random.rand(len(spot_list))
 
                 with classification_lock:
                     shared_memory_classification[fov_id] = {
@@ -332,13 +341,9 @@ def cleanup_process(cleanup_queue: mp.Queue):
         except Empty:
             continue
 
-from model import ResNet, run_model
+
 
 if __name__ == "__main__":
-    try:
-        mp.set_start_method('spawn')  # For CUDA compatibility with multiprocessing
-    except RuntimeError:
-        pass  # Ignore if the context has already been set
     # Create queues
     dpc_queue = mp.Queue()
     fluorescent_queue = mp.Queue()
@@ -349,15 +354,12 @@ if __name__ == "__main__":
     ui_queue = mp.Queue()
     cleanup_queue = mp.Queue()
 
-    print("Main")
-
     # Create and start processes
     processes = [
         mp.Process(target=image_acquisition, args=(dpc_queue, fluorescent_queue)),
         mp.Process(target=dpc_process, args=(dpc_queue, segmentation_queue)),
         mp.Process(target=segmentation_process, args=(segmentation_queue, classification_queue)),
         mp.Process(target=fluorescent_spot_detection, args=(fluorescent_queue, fluorescent_detection_queue)),
-        mp.Process(target=classification_process, args=(classification_queue, fluorescent_detection_queue, save_queue, ui_queue)),
         mp.Process(target=saving_process, args=(save_queue, cleanup_queue)),
         mp.Process(target=ui_process, args=(ui_queue, cleanup_queue)),
         mp.Process(target=cleanup_process, args=(cleanup_queue,)),
@@ -366,10 +368,16 @@ if __name__ == "__main__":
     for p in processes:
         p.start()
 
+    # Start classification process as a thread
+    classification_thread = threading.Thread(target=classification_process, 
+                                             args=(classification_queue, fluorescent_detection_queue, save_queue, ui_queue))
+    classification_thread.start()
+
     try:
         # Wait for all processes to complete
         for p in processes:
             p.join()
+        classification_thread.join()
     except KeyboardInterrupt:
         print("Stopping all processes...")
         for p in processes:
