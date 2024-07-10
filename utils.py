@@ -42,70 +42,65 @@ def remove_background(img_cpu, return_gpu_image=True):
 	else:
 		return cp.asnumpy(img_th_gpu)
 
-from scipy.ndimage import gaussian_filter
-
 def gaussian_kernel_1d(n, std, normalized=True):
     if normalized:
-        return cp.asarray(gaussian_filter(n, std))/(np.sqrt(2 * np.pi)*std)
-    return cp.asarray(gaussian_filter(n, std))
+        return cp.asarray(signal.gaussian(n, std))/(np.sqrt(2 * np.pi)*std)
+    return cp.asarray(signal.gaussian(n, std))
 
 def detect_spots(I, thresh = 12):
-	# filters
-	gauss_rs = np.array([4,6,8,10])
-	gauss_sigmas = np.array([1,1.5,2,2.5])
-	gauss_ts = np.divide(gauss_rs - 0.5,gauss_sigmas) # truncate value (to get desired radius)
-	lapl_kernel = cp.array([[0,1,0],[1,-4,1],[0,1,0]])
-	gauss_filters_1d = []
-	for i in range(gauss_rs.shape[0]):
-		gauss_filt_1d = gaussian_kernel_1d(gauss_rs[i]*2+1,gauss_sigmas[i],True)
-		gauss_filt_1d = gauss_filt_1d.reshape(-1, 1)
-		gauss_filters_1d.append(gauss_filt_1d)
-	# apply all filters
-	if len(I.shape) == 3:
-		I = cp.average(I, axis=2, weights=cp.array([0.299,0.587,0.114]))
-	filtered_imgs = []
-	for i in range(len(gauss_filters_1d)): # apply LoG filters
-		filt_img = cupyx.scipy.ndimage.convolve(I, gauss_filters_1d[i])
-		filt_img = cupyx.scipy.ndimage.convolve(filt_img, gauss_filters_1d[i].transpose())
-		filt_img = cupyx.scipy.ndimage.convolve(filt_img, lapl_kernel)
-		filt_img *= -(gauss_sigmas[i]**2)
-		filtered_imgs.append(filt_img)
-	img_max_proj = cp.max(np.stack(filtered_imgs), axis=0)
-	# return img_max_proj
-	img_max_filt = cupyx.scipy.ndimage.maximum_filter(img_max_proj, size=3)
-	# set pixels < thresh (12) to 0 (so they wont be in img_traceback)
-	img_max_filt[img_max_filt < thresh] = 0 # check if uint8
-	# origination masks
-	img_traceback = cp.zeros(img_max_filt.shape)
-	for i in range(len(filtered_imgs)): # trace back pixels to each filtered image
-		img_traceback[img_max_filt == filtered_imgs[i]] = i+1
-		img_traceback[img_max_filt == 0] = 0 # but make sure all pixels that were 0 are still 0
-	ind = np.where(img_traceback != 0)
-	spots = np.zeros((ind[0].shape[0],3)) # num spots x 3
-	for i in range(ind[0].shape[0]):
-		spots[i][0] = int(ind[1][i])
-		spots[i][1] = int(ind[0][i])
-		spots[i][2] = int(img_traceback[spots[i][1]][spots[i][0]])
-	spots = spots.astype(int)
-	return spots
+    # filters
+    gauss_rs = np.array([4,6,8,10])
+    gauss_sigmas = np.array([1,1.5,2,2.5])
+    gauss_ts = np.divide(gauss_rs - 0.5,gauss_sigmas) # truncate value (to get desired radius)
+    lapl_kernel = cp.array([[0,1,0],[1,-4,1],[0,1,0]])
+    gauss_filters_1d = []
+    for i in range(gauss_rs.shape[0]):
+        gauss_filt_1d = gaussian_kernel_1d(gauss_rs[i]*2+1,gauss_sigmas[i],True)
+        gauss_filt_1d = gauss_filt_1d.reshape(-1, 1)
+        gauss_filters_1d.append(gauss_filt_1d)
+    # apply all filters
+    if len(I.shape) == 3:
+        I = cp.average(I, axis=2, weights=cp.array([0.299,0.587,0.114]))
+    filtered_imgs = []
+    for i in range(len(gauss_filters_1d)): # apply LoG filters
+        filt_img = cupyx.scipy.ndimage.convolve(I, gauss_filters_1d[i])
+        filt_img = cupyx.scipy.ndimage.convolve(filt_img, gauss_filters_1d[i].transpose())
+        filt_img = cupyx.scipy.ndimage.convolve(filt_img, lapl_kernel)
+        filt_img *= -(gauss_sigmas[i]**2)
+        filtered_imgs.append(filt_img)
+    img_max_proj = cp.max(np.stack(filtered_imgs), axis=0)
+    img_max_filt = cupyx.scipy.ndimage.maximum_filter(img_max_proj, size=3)
+    img_max_filt[img_max_filt < thresh] = 0
+    img_traceback = cp.zeros(img_max_filt.shape)
+    for i in range(len(filtered_imgs)):
+        img_traceback[img_max_filt == filtered_imgs[i]] = i+1
+    ind = np.where(img_traceback != 0)
+    spots = np.zeros((ind[0].shape[0],3))
+    for i in range(ind[0].shape[0]):
+        spots[i][0] = int(ind[1][i])
+        spots[i][1] = int(ind[0][i])
+        spots[i][2] = int(img_traceback[spots[i][1]][spots[i][0]])
+    spots = spots.astype(int)
+    return spots
 
 # filter spots to avoid overlapping ones
+num_sigma = 4
+min_sigma = 1
+max_sigma = 2.5
+scale = np.linspace(0, 1, num_sigma)[:, np.newaxis]
+
 def prune_blobs(spots_list):
-	overlap = .5
-	num_sigma = 4
-	min_sigma = 1
-	max_sigma = 2.5
-	scale = np.linspace(0, 1, num_sigma)[:, np.newaxis]
-	sigma_list = scale * (max_sigma - min_sigma) + min_sigma
-	# translate final column of lm, which contains the index of the
-	# sigma that produced the maximum intensity value, into the sigma
-	sigmas_of_peaks = sigma_list[spots_list[:, -1]-1]
-	# select one sigma column, keeping dimension
-	sigmas_of_peaks = sigmas_of_peaks[:, 0:1]
-	# Remove sigma index and replace with sigmas
-	spots_list = np.hstack([spots_list[:,:-1], sigmas_of_peaks])
-	result_pruned = _prune_blobs(spots_list, overlap)
-	return result_pruned
+    overlap = .5
+    sigma_list = scale * (max_sigma - min_sigma) + min_sigma
+    # translate final column of lm, which contains the index of the
+    # sigma that produced the maximum intensity value, into the sigma
+    sigmas_of_peaks = sigma_list[spots_list[:, -1]-1]
+    # select one sigma column, keeping dimension
+    sigmas_of_peaks = sigmas_of_peaks[:, 0:1]
+    # Replace sigma index with sigmas in-place
+    spots_list[:, -1] = sigmas_of_peaks[:, 0]
+    result_pruned = _prune_blobs(spots_list, overlap)
+    return result_pruned
 
 def highlight_spots(I,spot_list,contrast_boost=1.6):
 	# bgremoved_fluorescence_spotBoxed = np.copy(bgremoved_fluorescence)
@@ -248,10 +243,10 @@ def numpy2png(img,filename,resize_factor=5):
 	x = resize_factor
 	img_overlay = cv2.resize(img_overlay, (int(img_overlay.shape[1]*x), int(img_overlay.shape[0]*x)), interpolation=cv2.INTER_NEAREST)
 	imageio.imwrite(filename + "_overlay.png", np.uint8(img_overlay))
-	img_fluorescence = cv2.resize(img_fluorescence, (int(img_fluorescence.shape[1]*x), int(img_fluorescence.shape[0]*x)), interpolation=cv2.INTER_NEAREST)
-	imageio.imwrite(filename + "_fluorescence.png", np.uint8(img_fluorescence))
-	img_dpc = cv2.resize(img_dpc, (int(img_dpc.shape[1]*x), int(img_dpc.shape[0]*x)), interpolation=cv2.INTER_NEAREST)
-	imageio.imwrite(filename + "_dpc.png", np.uint8(img_dpc))
+	#img_fluorescence = cv2.resize(img_fluorescence, (int(img_fluorescence.shape[1]*x), int(img_fluorescence.shape[0]*x)), interpolation=cv2.INTER_NEAREST)
+	#imageio.imwrite(filename + "_fluorescence.png", np.uint8(img_fluorescence))
+	#img_dpc = cv2.resize(img_dpc, (int(img_dpc.shape[1]*x), int(img_dpc.shape[0]*x)), interpolation=cv2.INTER_NEAREST)
+	#imageio.imwrite(filename + "_dpc.png", np.uint8(img_dpc))
 
 def save_flourescence_image(img,filename):
 	# 3 channels image

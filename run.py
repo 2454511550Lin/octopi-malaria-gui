@@ -1,4 +1,6 @@
 import multiprocessing as mp
+#import torch.multiprocessing as mp
+
 from multiprocessing import Lock
 import numpy as np
 from queue import Empty
@@ -8,6 +10,11 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 import base64
 from simulation import get_image
+import cupy as cp
+
+from log import report
+#import torch
+#DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # Existing shared memory managers
 manager = mp.Manager()
@@ -79,8 +86,8 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue):
             break
         
         #print(f"Image Acquisition: Processed FOV {fov_id}")
-        time.sleep(5)  
-        break
+        time.sleep(1) 
+         
 
 from utils import generate_dpc, save_dpc_image,save_flourescence_image
 
@@ -129,22 +136,29 @@ def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue):
             continue
 
 from utils import remove_background, resize_image_cp, detect_spots, prune_blobs, settings
+import cProfile
+
 def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue):
+    
     while True:
         try:
             fov_id = input_queue.get(timeout=timeout)
             log_time(fov_id, "Fluorescent Spot Detection", "start")
             
             fluorescent = shared_memory_acquisition[fov_id]['fluorescent']
-            
-            # remove background
+
             I_fluorescence_bg_removed = remove_background(fluorescent,return_gpu_image=True)
 
             # detect spots
+            log_time(fov_id,"detect spots","start")
             spot_list = detect_spots(resize_image_cp(I_fluorescence_bg_removed,
                                                      downsize_factor=settings['spot_detection_downsize_factor']),
                                                      thresh=settings['spot_detection_threshold'])
+            log_time(fov_id,"detect spots","end")
+
+            log_time(fov_id,"prune blobs","start")
             spot_list = prune_blobs(spot_list)
+            log_time(fov_id,"prune blobs","end")
 
             # scale coordinates for full-res image
             spot_list = spot_list*settings['spot_detection_downsize_factor']
@@ -157,10 +171,19 @@ def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue):
 
         except Empty:
             continue
+
 from utils import get_spot_images_from_fov
+
 def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Queue, save_queue: mp.Queue, ui_queue: mp.Queue):
     segmentation_ready = set()
     fluorescent_ready = set()
+
+    # initalize model
+    #CHECKPOINT = './checkpoint/resnet18_en/version1/best.pt'
+    #model = ResNet('resnet18').to(device=DEVICE)
+    #model.load_state_dict(torch.load(CHECKPOINT))
+    #model.eval()
+
     while True:
         try:
             # Check segmentation queue
@@ -182,8 +205,7 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
             for fov_id in ready_fovs:
                 log_time(fov_id, "Classification Process", "start")
                 print(f"Classification Process: Processing FOV {fov_id}")
-
-                
+     
                 segmentation_map = shared_memory_segmentation[fov_id]['segmentation_map']
                 spot_list = shared_memory_fluorescent[fov_id]['spot_indices']
                 
@@ -195,8 +217,9 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                 cropped_images = cropped_images.transpose(0, 3, 1, 2)
 
                 print(f"Classification Process: got spot images for FOV {fov_id}")
-                scores = np.random.rand(len(spot_list), 2)
-
+                #scores = run_model(model,DEVICE,cropped_images,4096)[:,1]
+                # random scores
+                scores = np.random.rand(len(spot_list))
 
                 with classification_lock:
                     shared_memory_classification[fov_id] = {
@@ -242,17 +265,16 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue):
                     cropped_images = shared_memory_classification[fov_id]['cropped_images']*255
                     print(f"Saving Process: Saving {len(cropped_images)} images for FOV {fov_id} with shape {cropped_images[0].shape}")
 
-                    path = 'data/cropped_images'
+                    path = 'cropped_images'
                     # randomly select 10 images
-                    random_indices = np.random.choice(len(cropped_images),10,replace=False)
+                    random_indices = np.random.choice(len(cropped_images),1,replace=False)
                     for i, cropped_image in enumerate(cropped_images[random_indices]):
                         filename = os.path.join(path, f"{fov_id}_{i}.png")
                         numpy2png(cropped_image,filename)
 
-                    dpc_image = shared_memory_dpc[fov_id]['dpc_image']*255
-                    save_dpc_image(dpc_image, f'data/{fov_id}.png')
-                    
-                   
+                    #dpc_image = shared_memory_dpc[fov_id]['dpc_image']*255
+                    #save_dpc_image(dpc_image, f'data/{fov_id}.png')
+                      
                     temp_dict = shared_memory_final[fov_id]
                     temp_dict['saved'] = True
                     shared_memory_final[fov_id] = temp_dict
@@ -287,35 +309,6 @@ def ui_process(input_queue: mp.Queue, output: mp.Queue):
         except Empty:
             continue
 
-def report(timing_data, fov_id):
-    processes = list(timing_data.keys())
-    max_end_time = max(timing_data[process]['end'] for process in processes)
-    min_start_time = min(timing_data[process]['start'] for process in processes)
-    total_duration = max_end_time - min_start_time
-
-    print(f"\n{'=' * 50}")
-    print(f"Timing report for FOV {fov_id}:")
-    print(f"{'=' * 50}")
-
-    # Calculate the maximum process name length for alignment
-    max_name_length = max(len(process) for process in processes)
-
-    for process in processes:
-        start_time = timing_data[process]['start'] - min_start_time
-        end_time = timing_data[process]['end'] - min_start_time
-        duration = end_time - start_time
-
-        # Calculate the position and width of the bar
-        bar_start = int((start_time / total_duration) * 50)
-        bar_width = max(1, int((duration / total_duration) * 50))
-
-        # Create the progress bar
-        progress_bar = ' ' * bar_start + '█' * bar_width + ' ' * (50 - bar_start - bar_width)
-
-        print(f"{process.ljust(max_name_length)} │ {duration:.3f}s │ {progress_bar} |")
-
-    print(f"\nTotal time: {total_duration:.3f}s")
-    print(f"{'=' * 50}")
         
 
 def cleanup_process(cleanup_queue: mp.Queue):
@@ -339,7 +332,13 @@ def cleanup_process(cleanup_queue: mp.Queue):
         except Empty:
             continue
 
+from model import ResNet, run_model
+
 if __name__ == "__main__":
+    try:
+        mp.set_start_method('spawn')  # For CUDA compatibility with multiprocessing
+    except RuntimeError:
+        pass  # Ignore if the context has already been set
     # Create queues
     dpc_queue = mp.Queue()
     fluorescent_queue = mp.Queue()
