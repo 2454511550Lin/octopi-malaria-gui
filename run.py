@@ -89,6 +89,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue):
         
         #print(f"Image Acquisition: Processed FOV {fov_id}")
         time.sleep(0.5) 
+        break
          
 
 from utils import generate_dpc, save_dpc_image,save_flourescence_image
@@ -238,8 +239,10 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                 scores1 = run_model(model1,DEVICE,cropped_images,4096)[:,1]
                 scores2 = run_model(model2,DEVICE,cropped_images,4096)[:,1]
 
+
                 # use whichever smaller as the final score
                 scores = np.minimum(scores1,scores2)
+
 
                 with classification_lock:
                     shared_memory_classification[fov_id] = {
@@ -308,6 +311,7 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue):
         except Empty:
             continue
 
+'''
 def ui_process(input_queue: mp.Queue, output: mp.Queue):
     while True:
         try:
@@ -327,7 +331,7 @@ def ui_process(input_queue: mp.Queue, output: mp.Queue):
                     log_time(fov_id, "UI Process", "end")
         except Empty:
             continue
-
+'''
         
 
 def cleanup_process(cleanup_queue: mp.Queue):
@@ -355,7 +359,7 @@ def cleanup_process(cleanup_queue: mp.Queue):
         except Empty:
             continue
 
-
+from ui import start_ui,ui_process
 
 if __name__ == "__main__":
     # Create queues
@@ -374,7 +378,7 @@ if __name__ == "__main__":
         mp.Process(target=dpc_process, args=(dpc_queue, segmentation_queue)),
         mp.Process(target=fluorescent_spot_detection, args=(fluorescent_queue, fluorescent_detection_queue)),
         mp.Process(target=saving_process, args=(save_queue, cleanup_queue)),
-        mp.Process(target=ui_process, args=(ui_queue, cleanup_queue)),
+        mp.Process(target=ui_process, args=(ui_queue, cleanup_queue, shared_memory_final, shared_memory_classification, shared_memory_segmentation,final_lock)),
         mp.Process(target=cleanup_process, args=(cleanup_queue,)),
     ]
 
