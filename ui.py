@@ -5,9 +5,10 @@ import numpy as np
 import imageio
 from PyQt5.QtWidgets import QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, QLineEdit, QPushButton, QScrollArea,QGridLayout,QSplitter
 from PyQt5.QtGui import QPixmap, QImage
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 import torch.multiprocessing as mp
 from queue import Empty
+import threading
 
 def numpy2png(img, resize_factor=5):
     try:
@@ -20,7 +21,8 @@ def numpy2png(img, resize_factor=5):
         img_dpc = img[:, :, 3]  # Last channel
 
         # Normalize the fluorescence image
-        img_fluorescence = (img_fluorescence - img_fluorescence.min()) / (img_fluorescence.max() - img_fluorescence.min())
+        epsilon = 1e-7
+        img_fluorescence = (img_fluorescence - img_fluorescence.min()) / (img_fluorescence.max() - img_fluorescence.min() + epsilon)
         img_fluorescence = (img_fluorescence * 255).astype(np.uint8)
 
         # Normalize the DPC image
@@ -116,6 +118,8 @@ class ImageAnalysisUI(QMainWindow):
         filter_layout.addWidget(QLabel("Min Score:"))
         self.score_filter = QLineEdit()
         self.score_filter.setPlaceholderText("Enter minimum score")
+        self.score_filter.setText("0.31")  # Set default value
+        self.score_filter.textChanged.connect(self.apply_filter) 
         filter_layout.addWidget(self.score_filter)
         filter_button = QPushButton("Apply Filter")
         filter_button.clicked.connect(self.apply_filter)
@@ -143,6 +147,65 @@ class ImageAnalysisUI(QMainWindow):
         self.cropped_scores = []
         self.fov_images = {}
         self.current_fov_index = -1
+        self.newest_fov_id = None
+
+        self.image_cache = {}
+        self.update_timer = QTimer()
+        self.update_timer.timeout.connect(self.update_display)
+        self.image_lock = threading.Lock()
+
+    def update_cropped_images(self, fov_id, images, scores):
+        with self.image_lock:
+            for img, score in zip(images, scores):
+                img_hash = hash(img.tobytes())
+                if img_hash not in self.image_cache:
+                    overlay_img = numpy2png(img, resize_factor=None)
+                    if overlay_img is not None:
+                        qimg = self.create_qimage(overlay_img)
+                        self.image_cache[img_hash] = (qimg, score)
+
+    def create_qimage(self, overlay_img):
+        height, width, channel = overlay_img.shape
+        bytes_per_line = 3 * width
+        return QImage(overlay_img.data, width, height, bytes_per_line, QImage.Format_RGB888)
+
+    def update_display(self):
+        self.display_cropped_images(float(self.score_filter.text() or 0))
+
+    def display_cropped_images(self, min_score=0.31):
+        # Clear existing images
+        for i in reversed(range(self.cropped_layout.count())): 
+            self.cropped_layout.itemAt(i).widget().setParent(None)
+
+        window_width = self.width()
+        image_width = 200
+        num_columns = max(1, window_width // (image_width + 10))
+
+        row, col = 0, 0
+        with self.image_lock:
+            for img_hash, (qimg, score) in self.image_cache.items():
+                if score >= min_score:
+                    pixmap = QPixmap.fromImage(qimg)
+                    scaled_pixmap = pixmap.scaled(image_width, image_width, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    
+                    label = QLabel()
+                    label.setPixmap(scaled_pixmap)
+                    label.setAlignment(Qt.AlignCenter)
+                    
+                    widget = QWidget()
+                    layout = QVBoxLayout()
+                    layout.addWidget(label)
+                    layout.addWidget(QLabel(f"Score: {score:.2f}"))
+                    widget.setLayout(layout)
+                    
+                    self.cropped_layout.addWidget(widget, row, col)
+                    
+                    col += 1
+                    if col >= num_columns:
+                        col = 0
+                        row += 1
+
+        self.cropped_layout.update()
 
     def update_fov_list(self, fov_id):
         self.fov_list.addItem(fov_id)
@@ -154,19 +217,16 @@ class ImageAnalysisUI(QMainWindow):
         overlay_img = self.create_overlay(dpc_image, fluorescent_image)
         self.fov_images[fov_id] = overlay_img
         
+        self.newest_fov_id = fov_id  # Update the newest FOV ID
         
-    
-        if self.current_fov_index == -1 or len(self.fov_images) == 1:
-            self.current_fov_index = len(self.fov_images) - 1
-        
+        # Always display the newest FOV
+        self.current_fov_index = list(self.fov_images.keys()).index(fov_id)
         self.display_current_fov()
 
 
     def display_current_fov(self):
-
-        if 0 <= self.current_fov_index < len(self.fov_images):
-            fov_id = list(self.fov_images.keys())[self.current_fov_index]
-            overlay_img = self.fov_images[fov_id]
+        if self.newest_fov_id and self.newest_fov_id in self.fov_images:
+            overlay_img = self.fov_images[self.newest_fov_id]
             height, width, channel = overlay_img.shape
             bytes_per_line = 3 * width
             q_img = QImage(overlay_img.data, width, height, bytes_per_line, QImage.Format_RGB888)
@@ -178,9 +238,8 @@ class ImageAnalysisUI(QMainWindow):
             
             self.fov_image_label.setPixmap(scaled_pixmap)
             self.fov_list.setCurrentRow(self.current_fov_index)
-            
         else:
-            print(f"Invalid FOV index: {self.current_fov_index}")
+            print(f"No FOV image available to display")
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -198,27 +257,21 @@ class ImageAnalysisUI(QMainWindow):
     def show_previous_fov(self):
         if self.current_fov_index > 0:
             self.current_fov_index -= 1
+            self.newest_fov_id = list(self.fov_images.keys())[self.current_fov_index]
             self.display_current_fov()
 
     def show_next_fov(self):
         if self.current_fov_index < len(self.fov_images) - 1:
             self.current_fov_index += 1
+            self.newest_fov_id = list(self.fov_images.keys())[self.current_fov_index]
             self.display_current_fov()
 
     def fov_list_item_clicked(self, item):
         fov_id = item.text()
         self.current_fov_index = list(self.fov_images.keys()).index(fov_id)
+        self.newest_fov_id = fov_id
         self.display_current_fov()
 
-    def update_cropped_images(self, fov_id, images, scores):
-        #print(f"Received images for FOV {fov_id}. Shape: {images.shape}, Type: {images.dtype}")
-        #print(f"Received scores. Shape: {scores.shape}, Type: {scores.dtype}")
-        
-        self.cropped_images.extend(images)
-        self.cropped_scores.extend(scores)
-        self.fov_data[fov_id]['spots'] = images.shape[0]
-        self.update_stats()
-        self.display_cropped_images()
 
     def update_rbc_count(self, fov_id, count):
         self.fov_data[fov_id]['rbc_count'] = count
@@ -235,50 +288,6 @@ class ImageAnalysisUI(QMainWindow):
             self.display_cropped_images(min_score)
         except ValueError:
             print("Invalid score filter")
-
-    def display_cropped_images(self, min_score=0.31):
-        # Clear existing images
-        for i in reversed(range(self.cropped_layout.count())): 
-            self.cropped_layout.itemAt(i).widget().setParent(None)
-
-        # Calculate the number of columns based on the window width
-        window_width = self.width()
-        image_width = 200  # Adjust this value as needed
-        num_columns = max(1, window_width // (image_width + 10))  # +10 for some padding
-
-        row, col = 0, 0
-        for img, score in zip(self.cropped_images, self.cropped_scores):
-            if score >= min_score:
-                overlay_img = numpy2png(img,resize_factor=None)
-                if overlay_img is not None:
-                    height, width, channel = overlay_img.shape
-                    bytes_per_line = 3 * width
-                    qimg = QImage(overlay_img.data, width, height, bytes_per_line, QImage.Format_RGB888)
-                    pixmap = QPixmap.fromImage(qimg)
-                    scaled_pixmap = pixmap.scaled(image_width, image_width, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                    
-                    label = QLabel()
-                    label.setPixmap(scaled_pixmap)
-                    label.setAlignment(Qt.AlignCenter)
-                    
-                    # Create a widget to hold the image and score
-                    widget = QWidget()
-                    layout = QVBoxLayout()
-                    layout.addWidget(label)
-                    layout.addWidget(QLabel(f"Score: {score:.2f}"))
-                    widget.setLayout(layout)
-                    
-                    self.cropped_layout.addWidget(widget, row, col)
-                    
-                    col += 1
-                    if col >= num_columns:
-                        col = 0
-                        row += 1
-                else:
-                    print(f"Failed to process image with score {score}")
-
-        # Force update
-        self.cropped_layout.update()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -329,7 +338,6 @@ class UIThread(QThread):
         scores = classification_data.get('scores', np.array([]))
         
         if len(images) > 0 and len(scores) > 0:
-            #print(f"Processing FOV {fov_id}")
             self.update_images.emit(fov_id, images, scores)
         else:
             print(f"No images or scores for FOV {fov_id}")

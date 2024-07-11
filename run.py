@@ -21,6 +21,8 @@ shared_memory_final = manager.dict()
 
 # New shared memory for timing information
 shared_memory_timing = manager.dict()
+shared_memory_timing['START'] = None
+shared_memory_timing['END'] = None
 
 # Existing locks
 dpc_lock = manager.Lock()
@@ -34,10 +36,14 @@ timing_lock = manager.Lock()
 
 timeout = 0.1
 
-
 def log_time(fov_id: str, process_name: str, event: str):
     with timing_lock:
         #print(f"Logging time for FOV {fov_id} in {process_name} at {event}")
+
+        if shared_memory_timing['START'] is None:
+            shared_memory_timing['START'] = time.time()
+        shared_memory_timing['END'] = time.time()
+
         if fov_id not in shared_memory_timing:
             shared_memory_timing[fov_id] = {}
         if process_name not in shared_memory_timing[fov_id]:
@@ -55,6 +61,9 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue):
 
     image_iterator = get_image()
 
+    counter = 0 
+
+    BEGIN = time.time()
     while True:
         
         # construct the iterator
@@ -88,8 +97,12 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue):
             break
         
         #print(f"Image Acquisition: Processed FOV {fov_id}")
-        time.sleep(3) 
-         
+        time.sleep(0.5) 
+
+        counter += 1
+        if counter == 40:
+            time.sleep(2) 
+            break
 
 from utils import generate_dpc, save_dpc_image,save_flourescence_image
 
@@ -137,6 +150,8 @@ def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue):
                 time.sleep(timeout)
             
             dpc_image = shared_memory_dpc[fov_id]['dpc_image']
+            # convert dpc to np.int8
+            dpc_image = (dpc_image*255).astype(np.uint8)
             
             result = model.predict_on_images(dpc_image)
             threshold = 0.5
@@ -350,6 +365,7 @@ def cleanup_process(cleanup_queue: mp.Queue):
                 print(f"RBC counts: {shared_memory_segmentation[fov_id]['n_cells']}, spots: {len(shared_memory_fluorescent[fov_id]['spot_indices'])}")
                 print(f"{'=' * 50}")
                 report(timing_data, fov_id)
+                #print(f"Average time for one FOV: {(shared_memory_timing['END'] - shared_memory_timing['START'])/(len(shared_memory_timing)-2)}")
 
                 for shared_memory in [shared_memory_acquisition, shared_memory_dpc, shared_memory_segmentation, shared_memory_fluorescent, 
                                       shared_memory_classification, shared_memory_final, shared_memory_timing]:
