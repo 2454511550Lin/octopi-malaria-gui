@@ -4,10 +4,6 @@ def report(timing_data, fov_id):
     min_start_time = min(timing_data[process]['start'] for process in processes)
     total_duration = max_end_time - min_start_time
 
-    print(f"\n{'=' * 50}")
-    print(f"Timing report for FOV {fov_id}:")
-    print(f"{'=' * 50}")
-
     # Calculate the maximum process name length for alignment
     max_name_length = max(len(process) for process in processes)
 

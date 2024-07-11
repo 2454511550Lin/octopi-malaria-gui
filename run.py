@@ -34,6 +34,7 @@ timing_lock = manager.Lock()
 
 timeout = 0.1
 
+
 def log_time(fov_id: str, process_name: str, event: str):
     with timing_lock:
         #print(f"Logging time for FOV {fov_id} in {process_name} at {event}")
@@ -87,7 +88,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue):
             break
         
         #print(f"Image Acquisition: Processed FOV {fov_id}")
-        time.sleep(1) 
+        time.sleep(0.5) 
          
 
 from utils import generate_dpc, save_dpc_image,save_flourescence_image
@@ -230,7 +231,7 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                 dpc_image = shared_memory_dpc[fov_id]['dpc_image']
                 fluorescence_image = shared_memory_acquisition[fov_id]['fluorescent'].astype(float)/255
                 
-                print(f"Classification Process: getting spot images for FOV {fov_id} with {len(spot_list)} spots")
+                # print(f"Classification Process: getting spot images for FOV {fov_id} with {len(spot_list)} spots")
                 cropped_images = get_spot_images_from_fov(fluorescence_image,dpc_image,spot_list,r=15)
                 cropped_images = cropped_images.transpose(0, 3, 1, 2)
 
@@ -279,24 +280,28 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue):
                     
                     # save the cropped images to png
                     cropped_images = shared_memory_classification[fov_id]['cropped_images']*255
-                    print(f"Saving Process: Saving {len(cropped_images)} images for FOV {fov_id} with shape {cropped_images[0].shape}")
+                    scores = shared_memory_classification[fov_id]['scores']
+                    
+                    SAVE_NUMPYARRAY = True
+                    PATH = 'saved_images'
+                    
+                    if not SAVE_NUMPYARRAY: 
+                        for i, cropped_image in enumerate(cropped_images):
+                            filename = os.path.join(PATH, f"{fov_id}_{i}.png")
+                            numpy2png(cropped_image,filename)
+                            #dpc_image = shared_memory_dpc[fov_id]['dpc_image']*255
+                            #save_dpc_image(dpc_image, f'data/{fov_id}.png')
+                    else:
+                        filename = os.path.join(PATH, f"{fov_id}.npy")
+                        np.save(filename, cropped_images)
+                        filename = os.path.join(PATH, f"{fov_id}_scores.npy")
+                        np.save(filename, scores)
 
-                    path = 'cropped_images'
-                    # randomly select 10 images
-                    random_indices = np.random.choice(len(cropped_images),1,replace=False)
-                    for i, cropped_image in enumerate(cropped_images[random_indices]):
-                        filename = os.path.join(path, f"{fov_id}_{i}.png")
-                        numpy2png(cropped_image,filename)
-
-                    #dpc_image = shared_memory_dpc[fov_id]['dpc_image']*255
-                    #save_dpc_image(dpc_image, f'data/{fov_id}.png')
-                      
                     temp_dict = shared_memory_final[fov_id]
                     temp_dict['saved'] = True
                     shared_memory_final[fov_id] = temp_dict
 
                     if shared_memory_final[fov_id]['displayed']:
-                        #print(f"Saving Process: FOV {fov_id} is ready for cleanup")
                         output.put(fov_id)
             
                     log_time(fov_id, "Saving Process", "end")
@@ -312,13 +317,11 @@ def ui_process(input_queue: mp.Queue, output: mp.Queue):
             with final_lock:
                 if fov_id in shared_memory_final and not shared_memory_final[fov_id]['displayed']:
                     # Placeholder for UI update
-                    #print(f"UI Process: Updated UI for FOV {fov_id}")
                     temp_dict = shared_memory_final[fov_id]
                     temp_dict['displayed'] = True
                     shared_memory_final[fov_id] = temp_dict
 
                     if shared_memory_final[fov_id]['saved']:
-                        #print(f"UI Process: FOV {fov_id} is ready for cleanup")
                         output.put(fov_id)
             
                     log_time(fov_id, "UI Process", "end")
@@ -338,7 +341,11 @@ def cleanup_process(cleanup_queue: mp.Queue):
                 # Calculate processing times and generate visualization
                 timing_data = shared_memory_timing[fov_id]
                 total_time = timing_data['UI Process']['end'] - timing_data['Image Acquisition']['start']
-
+                
+                print(f"\n{'=' * 50}")
+                print(f"Report for FOV {fov_id}:")
+                print(f"RBC counts: {shared_memory_segmentation[fov_id]['n_cells']}, spots: {len(shared_memory_fluorescent[fov_id]['spot_indices'])}")
+                print(f"{'=' * 50}")
                 report(timing_data, fov_id)
 
                 for shared_memory in [shared_memory_acquisition, shared_memory_dpc, shared_memory_segmentation, shared_memory_fluorescent, shared_memory_classification, shared_memory_final, shared_memory_timing]:
