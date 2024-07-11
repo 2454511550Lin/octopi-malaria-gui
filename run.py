@@ -88,8 +88,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue):
             break
         
         #print(f"Image Acquisition: Processed FOV {fov_id}")
-        time.sleep(0.5) 
-        break
+        time.sleep(3) 
          
 
 from utils import generate_dpc, save_dpc_image,save_flourescence_image
@@ -352,7 +351,8 @@ def cleanup_process(cleanup_queue: mp.Queue):
                 print(f"{'=' * 50}")
                 report(timing_data, fov_id)
 
-                for shared_memory in [shared_memory_acquisition, shared_memory_dpc, shared_memory_segmentation, shared_memory_fluorescent, shared_memory_classification, shared_memory_final, shared_memory_timing]:
+                for shared_memory in [shared_memory_acquisition, shared_memory_dpc, shared_memory_segmentation, shared_memory_fluorescent, 
+                                      shared_memory_classification, shared_memory_final, shared_memory_timing]:
                     if fov_id in shared_memory:
                         del shared_memory[fov_id]
             print(f"FOV {fov_id} memory is freed up")
@@ -378,7 +378,8 @@ if __name__ == "__main__":
         mp.Process(target=dpc_process, args=(dpc_queue, segmentation_queue)),
         mp.Process(target=fluorescent_spot_detection, args=(fluorescent_queue, fluorescent_detection_queue)),
         mp.Process(target=saving_process, args=(save_queue, cleanup_queue)),
-        mp.Process(target=ui_process, args=(ui_queue, cleanup_queue, shared_memory_final, shared_memory_classification, shared_memory_segmentation,final_lock)),
+        mp.Process(target=ui_process, args=(ui_queue, cleanup_queue, shared_memory_final, shared_memory_classification, 
+                                            shared_memory_segmentation,shared_memory_acquisition,shared_memory_dpc,shared_memory_timing, final_lock,timing_lock)),
         mp.Process(target=cleanup_process, args=(cleanup_queue,)),
     ]
 
