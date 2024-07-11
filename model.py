@@ -54,7 +54,6 @@ def generate_predictions(model, device, images, batch_size_inference):
 
     # run inference 
     all_predictions = []
-    t0 = time.time()
     for k, (images, labels) in enumerate(dataloader):
         images = images.float().to(device)
         predictions, _ = model.forward(images)
@@ -68,6 +67,6 @@ def generate_predictions(model, device, images, batch_size_inference):
     del dataset
     del dataloader
     predictions = np.vstack(all_predictions)
-    print('running inference on ' + str(predictions.shape[0]) + ' images took ' + str(time.time()-t0) + ' s')
+  
 
     return predictions

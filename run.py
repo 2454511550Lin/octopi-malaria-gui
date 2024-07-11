@@ -2,20 +2,12 @@
 #from multiprocessing import Lock
 
 import torch.multiprocessing as mp
-from torch.multiprocessing import Lock
 import numpy as np
 from queue import Empty
-from typing import Dict
 import time
-import matplotlib.pyplot as plt
-from io import BytesIO
-import base64
+
 from simulation import get_image
 import threading
-
-
-import cupy as cp
-
 from log import report
 
 # Existing shared memory managers
@@ -30,8 +22,6 @@ shared_memory_final = manager.dict()
 # New shared memory for timing information
 shared_memory_timing = manager.dict()
 
-
-
 # Existing locks
 dpc_lock = manager.Lock()
 segmentation_lock = manager.Lock()
@@ -39,13 +29,14 @@ fluorescent_lock = manager.Lock()
 classification_lock = manager.Lock()
 final_lock = manager.Lock()
 
-# New lock for timing information
+# time lock
 timing_lock = manager.Lock()
 
 timeout = 0.1
 
 def log_time(fov_id: str, process_name: str, event: str):
     with timing_lock:
+        #print(f"Logging time for FOV {fov_id} in {process_name} at {event}")
         if fov_id not in shared_memory_timing:
             shared_memory_timing[fov_id] = {}
         if process_name not in shared_memory_timing[fov_id]:
@@ -74,6 +65,12 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue):
             right_half = next(image_iterator)
             fluorescent = next(image_iterator)
 
+            # left and right should be 2800x2800, if three channels, convert to grayscale
+            if left_half.shape[2] == 3:
+                left_half = left_half[:,:,0]
+            if right_half.shape[2] == 3:
+                right_half = right_half[:,:,0]
+    
             shared_memory_acquisition[fov_id] = {
                 'left_half': crop_image(left_half),
                 'right_half': crop_image(right_half),
@@ -105,7 +102,12 @@ def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue):
             left_half = data['left_half'].astype(float)/255
             right_half = data['right_half'].astype(float)/255
             
-            dpc_image = generate_dpc(left_half, right_half,use_gpu=False)
+            dpc_image = generate_dpc(left_half, right_half,use_gpu=False) 
+
+            try:
+                assert dpc_image.shape == (2800, 2800)
+            except AssertionError:
+                print(f"FOV {fov_id} DPC image shape is {dpc_image.shape} but not (2800, 2800)")
             
             with dpc_lock:
                 shared_memory_dpc[fov_id] = {'dpc_image': dpc_image}
@@ -115,7 +117,15 @@ def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue):
         except Empty:
             continue
 
+
 def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue):
+    from interactive_m2unet_inference import M2UnetInteractiveModel as m2u
+    import torch
+    from scipy.ndimage import label
+
+    PATH = 'checkpoint/m2unet_model_flat_erode1_wdecay5_smallbatch/model_4000_11.pth'
+    model = m2u(pretrained_model=PATH, use_trt=False)
+    
     while True:
         try:
             fov_id = input_queue.get(timeout=timeout)
@@ -127,12 +137,13 @@ def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue):
             
             dpc_image = shared_memory_dpc[fov_id]['dpc_image']
             
-            # Placeholder for segmentation
-            segmentation_map = dpc_image > 0.5  # This is just a placeholder operation
-            #print(f"Segmentation Process: Processed FOV {fov_id}")
+            result = model.predict_on_images(dpc_image)
+            threshold = 0.5
+            segmentation_mask = (255*(result > threshold)).astype(np.uint8)
+            _, n_cells = label(segmentation_mask)
             
             with segmentation_lock:
-                shared_memory_segmentation[fov_id] = {'segmentation_map': segmentation_map}
+                shared_memory_segmentation[fov_id] = {'segmentation_map': segmentation_mask, 'n_cells': n_cells}
             
             output_queue.put(fov_id)
             log_time(fov_id, "Segmentation Process", "end")
@@ -140,7 +151,6 @@ def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue):
             continue
 
 from utils import remove_background, resize_image_cp, detect_spots, prune_blobs, settings
-import cProfile
 
 def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue):
     
@@ -153,16 +163,11 @@ def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue):
 
             I_fluorescence_bg_removed = remove_background(fluorescent,return_gpu_image=True)
 
-            # detect spots
-            log_time(fov_id,"detect spots","start")
             spot_list = detect_spots(resize_image_cp(I_fluorescence_bg_removed,
                                                      downsize_factor=settings['spot_detection_downsize_factor']),
                                                      thresh=settings['spot_detection_threshold'])
-            log_time(fov_id,"detect spots","end")
 
-            log_time(fov_id,"prune blobs","start")
             spot_list = prune_blobs(spot_list)
-            log_time(fov_id,"prune blobs","end")
 
             # scale coordinates for full-res image
             spot_list = spot_list*settings['spot_detection_downsize_factor']
@@ -188,10 +193,15 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
     fluorescent_ready = set()
 
     # initalize model
-    CHECKPOINT = './checkpoint/resnet18_en/version1/best.pt'
-    model = ResNet('resnet18').to(device=DEVICE)
-    model.load_state_dict(torch.load(CHECKPOINT))
-    model.eval()
+    CHECKPOINT1 = './checkpoint/resnet18_en/version1/best.pt'
+    model1 = ResNet('resnet18').to(device=DEVICE)
+    model1.load_state_dict(torch.load(CHECKPOINT1))
+    model1.eval()
+
+    CHECKPOINT2 = './checkpoint/resnet18_en/version2/best.pt'
+    model2 = ResNet('resnet18').to(device=DEVICE)
+    model2.load_state_dict(torch.load(CHECKPOINT2))
+    model2.eval()
 
     while True:
         try:
@@ -213,7 +223,6 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
             ready_fovs = segmentation_ready.intersection(fluorescent_ready)
             for fov_id in ready_fovs:
                 log_time(fov_id, "Classification Process", "start")
-                print(f"Classification Process: Processing FOV {fov_id}")
      
                 segmentation_map = shared_memory_segmentation[fov_id]['segmentation_map']
                 spot_list = shared_memory_fluorescent[fov_id]['spot_indices']
@@ -225,18 +234,17 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                 cropped_images = get_spot_images_from_fov(fluorescence_image,dpc_image,spot_list,r=15)
                 cropped_images = cropped_images.transpose(0, 3, 1, 2)
 
-                print(f"Classification Process: got spot images for FOV {fov_id}")
-                scores = run_model(model,DEVICE,cropped_images,4096)[:,1]
-                # random scores
-                #scores = np.random.rand(len(spot_list))
+                scores1 = run_model(model1,DEVICE,cropped_images,4096)[:,1]
+                scores2 = run_model(model2,DEVICE,cropped_images,4096)[:,1]
+
+                # use whichever smaller as the final score
+                scores = np.minimum(scores1,scores2)
 
                 with classification_lock:
                     shared_memory_classification[fov_id] = {
                         'cropped_images': cropped_images,
                         'scores': scores
                     }
-
-                print(f"Classification Process: Processed FOV {fov_id}")
                 
                 # Update shared_memory_final
                 with final_lock:
@@ -251,7 +259,6 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                 segmentation_ready.remove(fov_id)
                 fluorescent_ready.remove(fov_id)
 
-                #print(f"Classification Process: Processed FOV {fov_id}")
                 log_time(fov_id, "Classification Process", "end")
 
         except Exception as e:
@@ -358,7 +365,6 @@ if __name__ == "__main__":
     processes = [
         mp.Process(target=image_acquisition, args=(dpc_queue, fluorescent_queue)),
         mp.Process(target=dpc_process, args=(dpc_queue, segmentation_queue)),
-        mp.Process(target=segmentation_process, args=(segmentation_queue, classification_queue)),
         mp.Process(target=fluorescent_spot_detection, args=(fluorescent_queue, fluorescent_detection_queue)),
         mp.Process(target=saving_process, args=(save_queue, cleanup_queue)),
         mp.Process(target=ui_process, args=(ui_queue, cleanup_queue)),
@@ -368,10 +374,14 @@ if __name__ == "__main__":
     for p in processes:
         p.start()
 
-    # Start classification process as a thread
+
     classification_thread = threading.Thread(target=classification_process, 
                                              args=(classification_queue, fluorescent_detection_queue, save_queue, ui_queue))
+    segmentation_thread = threading.Thread(target=segmentation_process,
+                                           args=(segmentation_queue, classification_queue)) 
+
     classification_thread.start()
+    segmentation_thread.start()
 
     try:
         # Wait for all processes to complete
