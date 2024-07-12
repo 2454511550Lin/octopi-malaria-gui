@@ -57,8 +57,8 @@ def log_time(fov_id: str, process_name: str, event: str):
 
 from simulation import crop_image
 
-def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_event: mp.Event):
-
+def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
+    start_event.wait()  # wait for the start event to be set
     image_iterator = get_image()
 
     counter = 0 
@@ -392,15 +392,18 @@ if __name__ == "__main__":
     # Create an event to signal shutdown
     shutdown_event = mp.Event()
 
+    # Create an event to signal start
+    start_event = mp.Event()
+
     # Create and start processes
     processes = [
-        mp.Process(target=image_acquisition, args=(dpc_queue, fluorescent_queue, shutdown_event)),
+        mp.Process(target=image_acquisition, args=(dpc_queue, fluorescent_queue, shutdown_event,start_event)),
         mp.Process(target=dpc_process, args=(dpc_queue, segmentation_queue, shutdown_event)),
         mp.Process(target=fluorescent_spot_detection, args=(fluorescent_queue, fluorescent_detection_queue, shutdown_event)),
         mp.Process(target=saving_process, args=(save_queue, cleanup_queue, shutdown_event)),
         mp.Process(target=ui_process, args=(ui_queue, cleanup_queue, shared_memory_final, shared_memory_classification, 
                                             shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
-                                            shared_memory_timing, final_lock, timing_lock)),
+                                            shared_memory_timing, final_lock, timing_lock,start_event)),
         mp.Process(target=cleanup_process, args=(cleanup_queue, shutdown_event)),
     ]
 
@@ -414,6 +417,10 @@ if __name__ == "__main__":
 
     classification_thread.start()
     segmentation_thread.start()
+
+    print("Check the start event setting {}".format(start_event.is_set()))
+
+    start_event.wait()
 
     try:
         # Wait for all processes to complete or for shutdown event

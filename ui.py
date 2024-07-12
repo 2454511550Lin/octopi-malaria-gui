@@ -1,7 +1,7 @@
 import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout, 
                              QLabel, QListWidget, QLineEdit, QPushButton, QScrollArea, QGridLayout, 
-                             QSplitter, QSizePolicy, QTableWidget, QTableWidgetItem, QHeaderView,QAbstractItemView)
+                             QSplitter, QSizePolicy, QTableWidget, QTableWidgetItem, QHeaderView,QAbstractItemView, QMessageBox)
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 import pyqtgraph as pg
@@ -51,9 +51,10 @@ def numpy2png(img, resize_factor=5):
 
 class ImageAnalysisUI(QMainWindow):
     shutdown_signal = pyqtSignal()
-    
-    def __init__(self):
+
+    def __init__(self, start_event):
         super().__init__()
+        self.start_event = start_event
         self.setWindowTitle("Microscope Image Analysis")
         self.setGeometry(100, 100, 1920, 1080)
         self.setStyleSheet("""
@@ -71,6 +72,7 @@ class ImageAnalysisUI(QMainWindow):
         self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
 
+        self.patient_id = ""
         self.setup_ui()
 
         self.image_cache = {}
@@ -85,6 +87,19 @@ class ImageAnalysisUI(QMainWindow):
         self.resize_timer.timeout.connect(self.update_cropped_images_display)
 
     def setup_ui(self):
+        # Patient ID Label (initially empty)
+        self.patient_id_label = QLabel("")
+        self.patient_id_label.setAlignment(Qt.AlignCenter)
+        self.patient_id_label.setStyleSheet("""
+            font-size: 18px;
+            font-weight: bold;
+            color: #007bff;
+            padding: 10px;
+            background-color: #e6f2ff;
+            border-radius: 5px;
+        """)
+        self.main_layout.addWidget(self.patient_id_label)
+
         # Top layout with shutdown button
         top_layout = QHBoxLayout()
         top_layout.addStretch()
@@ -105,6 +120,56 @@ class ImageAnalysisUI(QMainWindow):
         # Tab widget
         self.tab_widget = QTabWidget()
         self.main_layout.addWidget(self.tab_widget)
+
+        # Start Tab
+        start_tab = QWidget()
+        start_layout = QVBoxLayout(start_tab)
+        
+        welcome_label = QLabel("Welcome to Octopi")
+        welcome_label.setAlignment(Qt.AlignCenter)
+        welcome_label.setStyleSheet("font-size: 50px; margin-bottom: 20px;")
+        start_layout.addWidget(welcome_label)
+
+        # Patient ID input (centered and compact)
+        patient_id_container = QWidget()
+        patient_id_layout = QHBoxLayout(patient_id_container)
+        patient_id_layout.setContentsMargins(0, 0, 0, 0)
+        patient_id_label = QLabel("Patient ID:")
+
+        font = patient_id_label.font()
+        font.setPointSize(20)  # Set the font size to 20
+        patient_id_label.setFont(font)
+
+        self.patient_id_input = QLineEdit()
+
+        # Set the font size of the QLineEdit
+        font = self.patient_id_input.font()
+        font.setPointSize(20)  # Set the font size to 20
+        self.patient_id_input.setFont(font)
+
+        self.patient_id_input = QLineEdit()
+        self.patient_id_input.setFixedWidth(200)  # Set a fixed width for the input field
+        self.patient_id_input.setPlaceholderText("Enter Patient ID")
+        patient_id_layout.addWidget(patient_id_label)
+        patient_id_layout.addWidget(self.patient_id_input)
+        patient_id_layout.addStretch()
+        start_layout.addWidget(patient_id_container, alignment=Qt.AlignCenter|Qt.AlignBottom)
+        
+        self.start_button = QPushButton("Start Analysis")
+        self.start_button.clicked.connect(self.start_analysis)
+        self.start_button.setFixedWidth(300)
+        self.start_button.setStyleSheet("""
+            QPushButton { 
+                background-color: #28a745; 
+                font-weight: bold;
+                padding: 30px 30px;
+                font-size: 30px;
+            }
+            QPushButton:hover { background-color: #218838; }
+        """)
+        start_layout.addWidget(self.start_button, alignment=Qt.AlignCenter)
+        
+        self.tab_widget.addTab(start_tab, "Start")
 
         # FOV Tab
         fov_tab = QWidget()
@@ -162,9 +227,9 @@ class ImageAnalysisUI(QMainWindow):
             font-weight: bold; 
             margin-top: 10px; 
             margin-bottom: 10px;
-            font-size: 50px;  /* Adjust the size as needed */
-            font-family: Arial, sans-serif;  /* Change the font family as desired */
-            color: black;  /* Change the color as needed */
+            font-size: 50px;
+            font-family: Arial, sans-serif;
+            color: black;
         """)
         cropped_layout.addWidget(self.stats_label)
 
@@ -181,8 +246,8 @@ class ImageAnalysisUI(QMainWindow):
         self.fov_image_view.ui.roiBtn.hide()
         self.fov_image_view.ui.menuBtn.hide()
         self.fov_image_view.ui.histogram.hide()
-        self.fov_image_view.getView().setAspectLocked(True)
-        self.fov_image_view.getView().invertY(True)
+        #self.fov_image_view.getView().setAspectLocked(True)
+        #self.fov_image_view.getView().invertY(True)
         self.fov_image_view.view.setMouseEnabled(x=False, y=False)
         #self.fov_image_view.view.hideAxis('left')
         #self.fov_image_view.view.hideAxis('bottom')
@@ -221,8 +286,8 @@ class ImageAnalysisUI(QMainWindow):
             self.cropped_layout.itemAt(i).widget().setParent(None)
 
         window_width = self.scroll_area.width()
-        image_width = 100
-        num_columns = max(1, window_width // (image_width + 5))
+        image_width = 41
+        num_columns = max(1, window_width // (image_width + 10))
 
         row, col = 0, 0
         self.total_malaria_positives = 0
@@ -249,9 +314,6 @@ class ImageAnalysisUI(QMainWindow):
                     if col >= num_columns:
                         col = 0
                         row += 1
-
-        self.scroll_widget.setLayout(self.cropped_layout)
-        self.update_stats()
 
         self.scroll_widget.setLayout(self.cropped_layout)
         self.update_stats()
@@ -350,27 +412,61 @@ class ImageAnalysisUI(QMainWindow):
         total_rbc = sum(data['rbc_count'] for data in self.fov_data.values())
         self.stats_label.setText(f"Total RBC Count: {total_rbc} | Total Malaria Positives: {self.total_malaria_positives}")
 
+    def start_analysis(self):
+        self.patient_id = self.patient_id_input.text().strip()
+        if not self.patient_id:
+            QMessageBox.warning(self, "Input Error", "Please enter a Patient ID before starting the analysis.")
+            return
+        
+        self.patient_id_label.setText(f"Patient ID: {self.patient_id}")
+        self.start_event.set()  # Signal the main process to start
+        self.tab_widget.setCurrentIndex(1)  # Switch to FOVs List tab
+        self.start_button.setEnabled(False)
+        self.start_button.setText("Analysis in Progress")
+
 class UIThread(QThread):
     update_fov = pyqtSignal(str)
     update_images = pyqtSignal(str, np.ndarray, np.ndarray)
     update_rbc = pyqtSignal(str, int)
-    update_fov_image = pyqtSignal(str, np.ndarray, np.ndarray)  # New signal for full FOV images
+    update_fov_image = pyqtSignal(str, np.ndarray, np.ndarray)
 
-    def __init__(self, input_queue,output,shared_memory_final, shared_memory_classification, shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc,shared_memory_timing,final_lock,timing_lock,window):
+    def __init__(self, input_queue, output, shared_memory_final, shared_memory_classification, 
+                 shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
+                 shared_memory_timing, final_lock, timing_lock, window):
         super().__init__()
         self.input_queue = input_queue
         self.output = output    
         self.shared_memory_final = shared_memory_final
         self.shared_memory_classification = shared_memory_classification
         self.shared_memory_segmentation = shared_memory_segmentation
-        self.shared_memory_acquisition = shared_memory_acquisition  # New shared memory for full images
+        self.shared_memory_acquisition = shared_memory_acquisition
         self.shared_memory_dpc = shared_memory_dpc
         self.shared_memory_timing = shared_memory_timing
         self.final_lock = final_lock
         self.timing_lock = timing_lock
         self.processed_fovs = set()
-
         self.window = window
+
+    def run(self):
+        while True:
+            try:
+                fov_id = self.input_queue.get(timeout=0.1)
+                self.log_time(fov_id, "UI Process", "start")
+
+                with self.final_lock:
+                    if fov_id in self.shared_memory_final and not self.shared_memory_final[fov_id]['displayed']:
+                        self.process_fov(fov_id)
+                        self.log_time(fov_id, "UI Process", "end")
+
+                        temp_dict = self.shared_memory_final[fov_id]
+                        temp_dict['displayed'] = True
+                        self.shared_memory_final[fov_id] = temp_dict    
+                        self.processed_fovs.add(fov_id)
+                        if self.shared_memory_final[fov_id]['saved']:
+                            self.output.put(fov_id)
+
+            except Empty:
+                pass
 
     def process_fov(self, fov_id):
         self.update_fov.emit(fov_id)
@@ -405,28 +501,8 @@ class UIThread(QThread):
             
 
 
-    def run(self):
 
-        while True:
-            try:
-                fov_id = self.input_queue.get(timeout=0.1)
-                self.log_time(fov_id, "UI Process", "start")
 
-                with self.final_lock:
-                    if fov_id in self.shared_memory_final and not self.shared_memory_final[fov_id]['displayed']:
-                        self.process_fov(fov_id)
-                        self.log_time(fov_id, "UI Process", "end")
-
-                        temp_dict = self.shared_memory_final[fov_id]
-                        temp_dict['displayed'] = True
-                        self.shared_memory_final[fov_id] = temp_dict    
-                        self.processed_fovs.add(fov_id)
-                        if self.shared_memory_final[fov_id]['saved']:
-                            self.output.put(fov_id)
-
-            except Empty:
-                #print("UI Process: No FOV to process")
-                pass
 
     
     def log_time(self,fov_id: str, process_name: str, event: str):
@@ -446,13 +522,16 @@ class UIThread(QThread):
     def connect_shutdown(self, shutdown_func):
         self.window.shutdown_signal.connect(shutdown_func)
 
-def ui_process(input_queue: mp.Queue, output: mp.Queue, shared_memory_final, shared_memory_classification, shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, shared_memory_timing,final_lock,timing_lock):
-    start_ui(input_queue,output,shared_memory_final, shared_memory_classification, shared_memory_segmentation,shared_memory_acquisition,shared_memory_dpc,shared_memory_timing, final_lock,timing_lock)
+def ui_process(input_queue: mp.Queue, output: mp.Queue, shared_memory_final, shared_memory_classification, shared_memory_segmentation, 
+               shared_memory_acquisition, shared_memory_dpc, shared_memory_timing, final_lock, timing_lock, start_event):
+    start_ui(input_queue, output, shared_memory_final, shared_memory_classification, shared_memory_segmentation, 
+             shared_memory_acquisition, shared_memory_dpc, shared_memory_timing, final_lock, timing_lock,start_event)
 
-def start_ui(input_queue, output, shared_memory_final, shared_memory_classification, shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, shared_memory_timing, final_lock, timing_lock):
+def start_ui(input_queue, output, shared_memory_final, shared_memory_classification, shared_memory_segmentation, 
+             shared_memory_acquisition, shared_memory_dpc, shared_memory_timing, final_lock, timing_lock,start_event):
     app = QApplication(sys.argv)
     pg.setConfigOptions(imageAxisOrder='row-major')
-    window = ImageAnalysisUI()
+    window = ImageAnalysisUI(start_event)
     
     ui_thread = UIThread(input_queue, output, shared_memory_final, shared_memory_classification, shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, shared_memory_timing, final_lock, timing_lock, window)
     ui_thread.update_fov.connect(window.update_fov_list)
@@ -464,6 +543,7 @@ def start_ui(input_queue, output, shared_memory_final, shared_memory_classificat
         app.quit()
     
     ui_thread.connect_shutdown(shutdown)
+
     ui_thread.start()
     
     window.show()
