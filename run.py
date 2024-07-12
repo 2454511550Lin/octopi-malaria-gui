@@ -322,6 +322,7 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
                         output.put(fov_id)
             
                     log_time(fov_id, "Saving Process", "end")
+        
         except Empty:
             continue
 
@@ -423,9 +424,9 @@ if __name__ == "__main__":
     finally:
         shutdown_event.set()
         for p in processes:
-            p.join(timeout=1)
+            p.join(timeout=0.1)
             if p.is_alive():
                 p.terminate()
-        classification_thread.join(timeout=1)
-        segmentation_thread.join(timeout=1)
+        classification_thread.join(timeout=0.1)
+        segmentation_thread.join(timeout=0.1)
         print("All processes have been shut down.")

@@ -159,6 +159,8 @@ class ImageAnalysisUI(QMainWindow):
         self.shutdown_button.clicked.connect(self.shutdown)
         main_layout.addWidget(self.shutdown_button)
 
+        self.total_malaria_positives = 0
+
     def shutdown(self):
         self.shutdown_signal.emit()
         self.close()
@@ -172,6 +174,7 @@ class ImageAnalysisUI(QMainWindow):
                     if overlay_img is not None:
                         qimg = self.create_qimage(overlay_img)
                         self.image_cache[img_hash] = (qimg, score)
+            self.update_stats() 
 
     def create_qimage(self, overlay_img):
         height, width, channel = overlay_img.shape
@@ -187,13 +190,15 @@ class ImageAnalysisUI(QMainWindow):
             self.cropped_layout.itemAt(i).widget().setParent(None)
 
         window_width = self.width()
-        image_width = 200
+        image_width = 100
         num_columns = max(1, window_width // (image_width + 10))
 
         row, col = 0, 0
+        self.total_malaria_positives = 0  # Reset the count
         with self.image_lock:
             for img_hash, (qimg, score) in self.image_cache.items():
                 if score >= min_score:
+                    self.total_malaria_positives += 1  # Increment the count
                     pixmap = QPixmap.fromImage(qimg)
                     scaled_pixmap = pixmap.scaled(image_width, image_width, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                     
@@ -215,6 +220,8 @@ class ImageAnalysisUI(QMainWindow):
                         row += 1
 
         self.cropped_layout.update()
+        self.update_stats()  # Update stats after recalculating malaria positives
+
 
     def update_fov_list(self, fov_id):
         self.fov_list.addItem(fov_id)
@@ -289,7 +296,8 @@ class ImageAnalysisUI(QMainWindow):
     def update_stats(self):
         total_spots = sum(data['spots'] for data in self.fov_data.values())
         total_rbc = sum(data['rbc_count'] for data in self.fov_data.values())
-        self.stats_label.setText(f"Total Spots: {total_spots} | Total RBC Count: {total_rbc}")
+        self.stats_label.setText(f"Total Spots: {total_spots} | Total RBC Count: {total_rbc} | Total Malaria Positives: {self.total_malaria_positives}")
+
 
     def apply_filter(self):
         try:
@@ -297,7 +305,6 @@ class ImageAnalysisUI(QMainWindow):
             self.display_cropped_images(min_score)
         except ValueError:
             print("Invalid score filter")
-
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.display_cropped_images(float(self.score_filter.text() or 0))
