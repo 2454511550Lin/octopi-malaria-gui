@@ -12,6 +12,8 @@ import torch.multiprocessing as mp
 from queue import Empty
 import threading
 
+import pyqtgraph as pg
+
 def numpy2png(img, resize_factor=5):
     try:
         # Ensure the image is in the correct shape (H, W, C)
@@ -106,10 +108,21 @@ class ImageAnalysisUI(QMainWindow):
         left_layout = QVBoxLayout()
         left_widget.setLayout(left_layout)
 
-        self.fov_image_label = QLabel()
-        self.fov_image_label.setAlignment(Qt.AlignCenter)
-        self.fov_image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        left_layout.addWidget(self.fov_image_label)
+        # PYQTGraph ImageView for displaying FOV images
+        self.fov_image_view = pg.ImageView()
+        self.fov_image_view.ui.roiBtn.hide()
+        self.fov_image_view.ui.menuBtn.hide()
+        self.fov_image_view.ui.histogram.hide()
+        self.fov_image_view.getView().setAspectLocked(True)
+        self.fov_image_view.getView().invertY(True)
+        #self.fov_image_view.view.setRange(xRange=[0, 1400], yRange=[0, 1400], padding=0)
+        #self.fov_image_view.view.setLimits(xMin=0, xMax=1400, yMin=0, yMax=1400)
+        #self.fov_image_view.view.setMouseEnabled(x=False, y=False)
+        #self.fov_image_view.view.hideAxis('left')
+        #self.fov_image_view.view.hideAxis('bottom')
+        left_layout.addWidget(self.fov_image_view)
+        # set background color
+        self.fov_image_view.view.setBackgroundColor((255, 255, 255))
 
         nav_layout = QHBoxLayout()
         self.prev_button = QPushButton("Previous")
@@ -184,6 +197,12 @@ class ImageAnalysisUI(QMainWindow):
         self.update_timer.timeout.connect(self.update_display)
         self.image_lock = threading.Lock()
         self.total_malaria_positives = 0    
+
+
+        self.fov_image_cache = {}  # Add this line to create a cache for FOV images
+        self.max_cache_size = 50  # Adjust this value based on your RAM capacity and image sizes
+
+
     def shutdown(self):
         self.shutdown_signal.emit()
         self.close()
@@ -198,6 +217,8 @@ class ImageAnalysisUI(QMainWindow):
                         qimg = self.create_qimage(overlay_img)
                         self.image_cache[img_hash] = (qimg, score)
             self.update_stats() 
+
+        self.display_cropped_images(float(self.score_filter.text() or 0))
 
     def create_qimage(self, overlay_img):
         height, width, channel = overlay_img.shape
@@ -251,34 +272,52 @@ class ImageAnalysisUI(QMainWindow):
         self.fov_data[fov_id] = {'spots': 0, 'rbc_count': 0}
 
     def update_fov_image(self, fov_id, dpc_image, fluorescent_image):
-        
         # Combine DPC and fluorescent images
         overlay_img = self.create_overlay(dpc_image, fluorescent_image)
-        self.fov_images[fov_id] = overlay_img
         
-        self.newest_fov_id = fov_id  # Update the newest FOV ID
+        # Cache the numpy array
+        self.fov_image_cache[fov_id] = overlay_img
         
-        # Always display the newest FOV
-        self.current_fov_index = list(self.fov_images.keys()).index(fov_id)
+        # Limit cache size
+        if len(self.fov_image_cache) > self.max_cache_size:
+            oldest_fov = next(iter(self.fov_image_cache))
+            del self.fov_image_cache[oldest_fov]
+        
+        self.newest_fov_id = fov_id
+        self.current_fov_index = list(self.fov_image_cache.keys()).index(fov_id)
         self.display_current_fov()
 
-
     def display_current_fov(self):
-        if self.newest_fov_id and self.newest_fov_id in self.fov_images:
-            overlay_img = self.fov_images[self.newest_fov_id]
-            height, width, channel = overlay_img.shape
-            bytes_per_line = 3 * width
-            q_img = QImage(overlay_img.data, width, height, bytes_per_line, QImage.Format_RGB888)
-            pixmap = QPixmap.fromImage(q_img)
+        if self.newest_fov_id and self.newest_fov_id in self.fov_image_cache:
+            overlay_img = self.fov_image_cache[self.newest_fov_id]
             
-            # Fit the image to the label size
-            scaled_pixmap = pixmap.scaled(self.fov_image_label.width(), self.fov_image_label.height(), 
-                                          Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            
-            self.fov_image_label.setPixmap(scaled_pixmap)
+            # Update the PyQtGraph ImageView
+            self.fov_image_view.setImage(overlay_img, autoLevels=False, levels=(0, 255))
             self.fov_list.setCurrentRow(self.current_fov_index)
         else:
             print(f"No FOV image available to display")
+
+    def show_previous_fov(self):
+        if self.current_fov_index > 0:
+            self.current_fov_index -= 1
+            self.newest_fov_id = list(self.fov_image_cache.keys())[self.current_fov_index]
+            self.display_current_fov()
+
+    def show_next_fov(self):
+        if self.current_fov_index < len(self.fov_image_cache) - 1:
+            self.current_fov_index += 1
+            self.newest_fov_id = list(self.fov_image_cache.keys())[self.current_fov_index]
+            self.display_current_fov()
+
+    def fov_list_item_clicked(self, item):
+        fov_id = item.text()
+        if fov_id in self.fov_image_cache:
+            self.current_fov_index = list(self.fov_image_cache.keys()).index(fov_id)
+            self.newest_fov_id = fov_id
+            self.display_current_fov()
+        else:
+            print(f"FOV {fov_id} not in cache. It may need to be loaded.")
+
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -292,25 +331,6 @@ class ImageAnalysisUI(QMainWindow):
         img =  numpy2png(img,resize_factor=0.5)
         
         return img
-
-    def show_previous_fov(self):
-        if self.current_fov_index > 0:
-            self.current_fov_index -= 1
-            self.newest_fov_id = list(self.fov_images.keys())[self.current_fov_index]
-            self.display_current_fov()
-
-    def show_next_fov(self):
-        if self.current_fov_index < len(self.fov_images) - 1:
-            self.current_fov_index += 1
-            self.newest_fov_id = list(self.fov_images.keys())[self.current_fov_index]
-            self.display_current_fov()
-
-    def fov_list_item_clicked(self, item):
-        fov_id = item.text()
-        self.current_fov_index = list(self.fov_images.keys()).index(fov_id)
-        self.newest_fov_id = fov_id
-        self.display_current_fov()
-
 
     def update_rbc_count(self, fov_id, count):
         self.fov_data[fov_id]['rbc_count'] = count
@@ -433,9 +453,10 @@ def ui_process(input_queue: mp.Queue, output: mp.Queue, shared_memory_final, sha
 
 def start_ui(input_queue, output, shared_memory_final, shared_memory_classification, shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, shared_memory_timing, final_lock, timing_lock):
     app = QApplication(sys.argv)
+    pg.setConfigOptions(imageAxisOrder='row-major')
     window = ImageAnalysisUI()
     
-    ui_thread = UIThread(input_queue, output, shared_memory_final, shared_memory_classification, shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, shared_memory_timing, final_lock, timing_lock,window)
+    ui_thread = UIThread(input_queue, output, shared_memory_final, shared_memory_classification, shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, shared_memory_timing, final_lock, timing_lock, window)
     ui_thread.update_fov.connect(window.update_fov_list)
     ui_thread.update_images.connect(window.update_cropped_images)
     ui_thread.update_rbc.connect(window.update_rbc_count)

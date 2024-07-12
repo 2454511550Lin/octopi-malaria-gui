@@ -100,7 +100,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
         time.sleep(0.5) 
 
         counter += 1
-        if counter == 40:
+        if counter == 20:
             time.sleep(2) 
             break
 
