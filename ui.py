@@ -46,6 +46,7 @@ def numpy2png(img, resize_factor=5):
         return None
 
 class ImageAnalysisUI(QMainWindow):
+    shutdown_signal = pyqtSignal()
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Microscope Image Analysis")
@@ -153,6 +154,14 @@ class ImageAnalysisUI(QMainWindow):
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self.update_display)
         self.image_lock = threading.Lock()
+
+        self.shutdown_button = QPushButton("Shutdown")
+        self.shutdown_button.clicked.connect(self.shutdown)
+        main_layout.addWidget(self.shutdown_button)
+
+    def shutdown(self):
+        self.shutdown_signal.emit()
+        self.close()
 
     def update_cropped_images(self, fov_id, images, scores):
         with self.image_lock:
@@ -293,15 +302,13 @@ class ImageAnalysisUI(QMainWindow):
         super().resizeEvent(event)
         self.display_cropped_images(float(self.score_filter.text() or 0))
 
-
-
 class UIThread(QThread):
     update_fov = pyqtSignal(str)
     update_images = pyqtSignal(str, np.ndarray, np.ndarray)
     update_rbc = pyqtSignal(str, int)
     update_fov_image = pyqtSignal(str, np.ndarray, np.ndarray)  # New signal for full FOV images
 
-    def __init__(self, input_queue,output,shared_memory_final, shared_memory_classification, shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc,shared_memory_timing,final_lock,timing_lock):
+    def __init__(self, input_queue,output,shared_memory_final, shared_memory_classification, shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc,shared_memory_timing,final_lock,timing_lock,window):
         super().__init__()
         self.input_queue = input_queue
         self.output = output    
@@ -314,6 +321,8 @@ class UIThread(QThread):
         self.final_lock = final_lock
         self.timing_lock = timing_lock
         self.processed_fovs = set()
+
+        self.window = window
 
     def process_fov(self, fov_id):
         self.update_fov.emit(fov_id)
@@ -386,18 +395,26 @@ class UIThread(QThread):
             temp_dict[process_name] = temp_process_dict
             self.shared_memory_timing[fov_id] = temp_dict
 
+    def connect_shutdown(self, shutdown_func):
+        self.window.shutdown_signal.connect(shutdown_func)
+
 def ui_process(input_queue: mp.Queue, output: mp.Queue, shared_memory_final, shared_memory_classification, shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, shared_memory_timing,final_lock,timing_lock):
     start_ui(input_queue,output,shared_memory_final, shared_memory_classification, shared_memory_segmentation,shared_memory_acquisition,shared_memory_dpc,shared_memory_timing, final_lock,timing_lock)
 
-def start_ui(input_queue,output,shared_memory_final, shared_memory_classification, shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc,shared_memory_timing,final_lock,timing_lock):
+def start_ui(input_queue, output, shared_memory_final, shared_memory_classification, shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, shared_memory_timing, final_lock, timing_lock):
     app = QApplication(sys.argv)
     window = ImageAnalysisUI()
     
-    ui_thread = UIThread(input_queue,output,shared_memory_final, shared_memory_classification, shared_memory_segmentation, shared_memory_acquisition,shared_memory_dpc, shared_memory_timing,final_lock,timing_lock)
+    ui_thread = UIThread(input_queue, output, shared_memory_final, shared_memory_classification, shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, shared_memory_timing, final_lock, timing_lock,window)
     ui_thread.update_fov.connect(window.update_fov_list)
     ui_thread.update_images.connect(window.update_cropped_images)
     ui_thread.update_rbc.connect(window.update_rbc_count)
-    ui_thread.update_fov_image.connect(window.update_fov_image)  # Connect new signal
+    ui_thread.update_fov_image.connect(window.update_fov_image)
+    
+    def shutdown():
+        app.quit()
+    
+    ui_thread.connect_shutdown(shutdown)
     ui_thread.start()
     
     window.show()

@@ -57,14 +57,14 @@ def log_time(fov_id: str, process_name: str, event: str):
 
 from simulation import crop_image
 
-def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue):
+def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_event: mp.Event):
 
     image_iterator = get_image()
 
     counter = 0 
 
     BEGIN = time.time()
-    while True:
+    while not shutdown_event.is_set():
         
         # construct the iterator
         try:
@@ -106,8 +106,8 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue):
 
 from utils import generate_dpc, save_dpc_image,save_flourescence_image
 
-def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue):
-    while True:
+def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp.Event):
+    while not shutdown_event.is_set():
         try:
             fov_id = input_queue.get(timeout=timeout)
             log_time(fov_id, "DPC Process", "start")
@@ -132,7 +132,7 @@ def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue):
             continue
 
 
-def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue):
+def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp.Event):
     from interactive_m2unet_inference import M2UnetInteractiveModel as m2u
     import torch
     from scipy.ndimage import label
@@ -140,7 +140,7 @@ def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue):
     PATH = 'checkpoint/m2unet_model_flat_erode1_wdecay5_smallbatch/model_4000_11.pth'
     model = m2u(pretrained_model=PATH, use_trt=False)
     
-    while True:
+    while not shutdown_event.is_set():
         try:
             fov_id = input_queue.get(timeout=timeout)
             log_time(fov_id, "Segmentation Process", "start")
@@ -168,9 +168,9 @@ def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue):
 
 from utils import remove_background, resize_image_cp, detect_spots, prune_blobs, settings
 
-def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue):
+def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp.Event):
     
-    while True:
+    while not shutdown_event.is_set():
         try:
             fov_id = input_queue.get(timeout=timeout)
             log_time(fov_id, "Fluorescent Spot Detection", "start")
@@ -200,7 +200,7 @@ def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue):
 from utils import get_spot_images_from_fov
 from model import ResNet, run_model    
 
-def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Queue, save_queue: mp.Queue, ui_queue: mp.Queue):
+def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Queue, save_queue: mp.Queue, ui_queue: mp.Queue,shutdown_event: mp.Event):
 
     import torch
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -219,7 +219,7 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
     model2.load_state_dict(torch.load(CHECKPOINT2))
     model2.eval()
 
-    while True:
+    while not shutdown_event.is_set():
         try:
             # Check segmentation queue
             try:
@@ -286,8 +286,8 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
 from utils import numpy2png
 import os
 
-def saving_process(input_queue: mp.Queue, output: mp.Queue):
-    while True:
+def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Event):
+    while not shutdown_event.is_set():
         try:
             fov_id = input_queue.get(timeout=timeout)
             log_time(fov_id, "Saving Process", "start")
@@ -348,8 +348,8 @@ def ui_process(input_queue: mp.Queue, output: mp.Queue):
 '''
         
 
-def cleanup_process(cleanup_queue: mp.Queue):
-    while True:
+def cleanup_process(cleanup_queue: mp.Queue,shutdown_event: mp.Event):
+    while not shutdown_event.is_set():
         try:
             fov_id = cleanup_queue.get(timeout=timeout)
             
@@ -388,35 +388,44 @@ if __name__ == "__main__":
     ui_queue = mp.Queue()
     cleanup_queue = mp.Queue()
 
+    # Create an event to signal shutdown
+    shutdown_event = mp.Event()
+
     # Create and start processes
     processes = [
-        mp.Process(target=image_acquisition, args=(dpc_queue, fluorescent_queue)),
-        mp.Process(target=dpc_process, args=(dpc_queue, segmentation_queue)),
-        mp.Process(target=fluorescent_spot_detection, args=(fluorescent_queue, fluorescent_detection_queue)),
-        mp.Process(target=saving_process, args=(save_queue, cleanup_queue)),
+        mp.Process(target=image_acquisition, args=(dpc_queue, fluorescent_queue, shutdown_event)),
+        mp.Process(target=dpc_process, args=(dpc_queue, segmentation_queue, shutdown_event)),
+        mp.Process(target=fluorescent_spot_detection, args=(fluorescent_queue, fluorescent_detection_queue, shutdown_event)),
+        mp.Process(target=saving_process, args=(save_queue, cleanup_queue, shutdown_event)),
         mp.Process(target=ui_process, args=(ui_queue, cleanup_queue, shared_memory_final, shared_memory_classification, 
-                                            shared_memory_segmentation,shared_memory_acquisition,shared_memory_dpc,shared_memory_timing, final_lock,timing_lock)),
-        mp.Process(target=cleanup_process, args=(cleanup_queue,)),
+                                            shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
+                                            shared_memory_timing, final_lock, timing_lock)),
+        mp.Process(target=cleanup_process, args=(cleanup_queue, shutdown_event)),
     ]
 
     for p in processes:
         p.start()
 
-
     classification_thread = threading.Thread(target=classification_process, 
-                                             args=(classification_queue, fluorescent_detection_queue, save_queue, ui_queue))
+                                             args=(classification_queue, fluorescent_detection_queue, save_queue, ui_queue, shutdown_event))
     segmentation_thread = threading.Thread(target=segmentation_process,
-                                           args=(segmentation_queue, classification_queue)) 
+                                           args=(segmentation_queue, classification_queue, shutdown_event)) 
 
     classification_thread.start()
     segmentation_thread.start()
 
     try:
-        # Wait for all processes to complete
-        for p in processes:
-            p.join()
-        classification_thread.join()
+        # Wait for all processes to complete or for shutdown event
+        while not shutdown_event.is_set():
+            time.sleep(1)
     except KeyboardInterrupt:
         print("Stopping all processes...")
+    finally:
+        shutdown_event.set()
         for p in processes:
-            p.terminate()
+            p.join(timeout=1)
+            if p.is_alive():
+                p.terminate()
+        classification_thread.join(timeout=1)
+        segmentation_thread.join(timeout=1)
+        print("All processes have been shut down.")
