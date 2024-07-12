@@ -1,18 +1,18 @@
 import sys
-import os
-import cv2
-import numpy as np
-import imageio
-from PyQt5.QtWidgets import QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, QLineEdit, QPushButton, QScrollArea,QGridLayout,QSplitter
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout, 
+                             QLabel, QListWidget, QLineEdit, QPushButton, QScrollArea, QGridLayout, 
+                             QSplitter, QSizePolicy, QTableWidget, QTableWidgetItem, QHeaderView,QAbstractItemView)
 from PyQt5.QtGui import QPixmap, QImage
-
-from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QSplitter, QLabel, QPushButton, QListWidget, QScrollArea, QGridLayout, QLineEdit,QFrame, QSizePolicy)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
-import torch.multiprocessing as mp
-from queue import Empty
-import threading
-
 import pyqtgraph as pg
+import numpy as np
+import torch.multiprocessing as mp
+import threading
+from queue import Empty
+import cv2
+
+
+MINIMUM_SCORE_THRESHOLD = 0.31  # Adjust this value as needed
 
 def numpy2png(img, resize_factor=5):
     try:
@@ -51,10 +51,11 @@ def numpy2png(img, resize_factor=5):
 
 class ImageAnalysisUI(QMainWindow):
     shutdown_signal = pyqtSignal()
+    
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Microscope Image Analysis")
-        self.setGeometry(100, 100, 1600, 900)
+        self.setGeometry(100, 100, 1920, 1080)
         self.setStyleSheet("""
             QMainWindow { background-color: #f0f0f0; }
             QTabWidget::pane { border: 1px solid #d0d0d0; background-color: white; }
@@ -65,23 +66,31 @@ class ImageAnalysisUI(QMainWindow):
             QLineEdit { padding: 6px; border: 1px solid #d0d0d0; border-radius: 4px; }
             QLabel { color: #333333; }
         """)
+        self.image_lock = threading.Lock()
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.main_layout = QVBoxLayout(self.central_widget)
 
-        main_widget = QWidget()
-        main_layout = QVBoxLayout()
-        main_widget.setLayout(main_layout)
-        self.setCentralWidget(main_widget)
+        self.setup_ui()
 
-        # Create a horizontal layout for the top section
+        self.image_cache = {}
+        self.fov_image_cache = {}
+        self.fov_data = {}
+        self.max_cache_size = 50
+        self.current_fov_index = -1
+        self.newest_fov_id = None
+
+        self.resize_timer = QTimer(self)
+        self.resize_timer.setSingleShot(True)
+        self.resize_timer.timeout.connect(self.update_cropped_images_display)
+
+    def setup_ui(self):
+        # Top layout with shutdown button
         top_layout = QHBoxLayout()
-        main_layout.addLayout(top_layout)
-
-        # Add a spacer to push the shutdown button to the right
         top_layout.addStretch()
-
-        # Create and style the shutdown button
         self.shutdown_button = QPushButton("Shutdown")
         self.shutdown_button.clicked.connect(self.shutdown)
-        self.shutdown_button.setFixedWidth(120)  # Make the button narrower
+        self.shutdown_button.setFixedWidth(120)
         self.shutdown_button.setStyleSheet("""
             QPushButton { 
                 background-color: #dc3545; 
@@ -91,38 +100,24 @@ class ImageAnalysisUI(QMainWindow):
             QPushButton:hover { background-color: #c82333; }
         """)
         top_layout.addWidget(self.shutdown_button)
+        self.main_layout.addLayout(top_layout)
 
-        tab_widget = QTabWidget()
-        main_layout.addWidget(tab_widget)
+        # Tab widget
+        self.tab_widget = QTabWidget()
+        self.main_layout.addWidget(self.tab_widget)
 
         # FOV Tab
         fov_tab = QWidget()
-        fov_layout = QVBoxLayout()
-        fov_tab.setLayout(fov_layout)
-
+        fov_layout = QVBoxLayout(fov_tab)
         splitter = QSplitter(Qt.Horizontal)
         fov_layout.addWidget(splitter)
 
         # Left side: FOV image
         left_widget = QWidget()
-        left_layout = QVBoxLayout()
-        left_widget.setLayout(left_layout)
-
-        # PYQTGraph ImageView for displaying FOV images
+        left_layout = QVBoxLayout(left_widget)
         self.fov_image_view = pg.ImageView()
-        self.fov_image_view.ui.roiBtn.hide()
-        self.fov_image_view.ui.menuBtn.hide()
-        self.fov_image_view.ui.histogram.hide()
-        self.fov_image_view.getView().setAspectLocked(True)
-        self.fov_image_view.getView().invertY(True)
-        #self.fov_image_view.view.setRange(xRange=[0, 1400], yRange=[0, 1400], padding=0)
-        #self.fov_image_view.view.setLimits(xMin=0, xMax=1400, yMin=0, yMax=1400)
-        #self.fov_image_view.view.setMouseEnabled(x=False, y=False)
-        #self.fov_image_view.view.hideAxis('left')
-        #self.fov_image_view.view.hideAxis('bottom')
+        self.setup_fov_image_view()
         left_layout.addWidget(self.fov_image_view)
-        # set background color
-        self.fov_image_view.view.setBackgroundColor((255, 255, 255))
 
         nav_layout = QHBoxLayout()
         self.prev_button = QPushButton("Previous")
@@ -137,70 +132,61 @@ class ImageAnalysisUI(QMainWindow):
 
         # Right side: FOV list
         right_widget = QWidget()
-        right_layout = QVBoxLayout()
-        right_widget.setLayout(right_layout)
-
-        self.fov_list = QListWidget()
-        self.fov_list.itemClicked.connect(self.fov_list_item_clicked)
-        self.fov_list.setStyleSheet("""
-            QListWidget { border: 1px solid #d0d0d0; border-radius: 4px; }
-            QListWidget::item { padding: 6px; }
-            QListWidget::item:selected { background-color: #007bff; color: white; }
+        right_layout = QVBoxLayout(right_widget)
+        self.fov_table = QTableWidget()
+        self.fov_table.setColumnCount(3)
+        self.fov_table.setHorizontalHeaderLabels(["FOV id", "RBCs", "Positives"])
+        self.fov_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.fov_table.verticalHeader().setVisible(False)
+        self.fov_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.fov_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.fov_table.itemClicked.connect(self.fov_table_item_clicked)
+        self.fov_table.setStyleSheet("""
+            QTableWidget { border: 1px solid #d0d0d0; border-radius: 4px; }
+            QTableWidget::item { padding: 6px; }
+            QTableWidget::item:selected { background-color: #007bff; color: white; }
         """)
-        right_layout.addWidget(self.fov_list)
+        right_layout.addWidget(self.fov_table)
 
         splitter.addWidget(right_widget)
         splitter.setSizes([1300, 300])
 
-        tab_widget.addTab(fov_tab, "FOV List")
+        self.tab_widget.addTab(fov_tab, "FOVs List")
 
         # Cropped Images Tab
         cropped_tab = QWidget()
-        cropped_layout = QVBoxLayout()
-        cropped_tab.setLayout(cropped_layout)
+        cropped_layout = QVBoxLayout(cropped_tab)
 
-        filter_layout = QHBoxLayout()
-        filter_layout.addWidget(QLabel("Min Score:"))
-        self.score_filter = QLineEdit()
-        self.score_filter.setPlaceholderText("Enter minimum score")
-        self.score_filter.setText("0.31")
-        self.score_filter.textChanged.connect(self.apply_filter)
-        filter_layout.addWidget(self.score_filter)
-        filter_button = QPushButton("Apply Filter")
-        filter_button.clicked.connect(self.apply_filter)
-        filter_layout.addWidget(filter_button)
-        cropped_layout.addLayout(filter_layout)
-
-        self.stats_label = QLabel("Total Spots: 0 | Total RBC Count: 0")
-        self.stats_label.setStyleSheet("font-weight: bold; margin-top: 10px; margin-bottom: 10px;")
+        self.stats_label = QLabel("Total RBC Count: 0 | Total Malaria Positives: 0")
+        self.stats_label.setStyleSheet("""
+            font-weight: bold; 
+            margin-top: 10px; 
+            margin-bottom: 10px;
+            font-size: 50px;  /* Adjust the size as needed */
+            font-family: Arial, sans-serif;  /* Change the font family as desired */
+            color: black;  /* Change the color as needed */
+        """)
         cropped_layout.addWidget(self.stats_label)
 
         self.scroll_area = QScrollArea()
         self.scroll_widget = QWidget()
-        self.cropped_layout = QGridLayout()
-        self.scroll_widget.setLayout(self.cropped_layout)
+        self.cropped_layout = QGridLayout(self.scroll_widget)
         self.scroll_area.setWidget(self.scroll_widget)
         self.scroll_area.setWidgetResizable(True)
         cropped_layout.addWidget(self.scroll_area)
 
-        tab_widget.addTab(cropped_tab, "Cropped Images")
+        self.tab_widget.addTab(cropped_tab, "Malaria Detection Report")
 
-        # Initialize data structures
-        self.fov_data = {}
-        self.cropped_images = []
-        self.cropped_scores = []
-        self.fov_images = {}
-        self.current_fov_index = -1
-        self.newest_fov_id = None
-        self.image_cache = {}
-        self.update_timer = QTimer()
-        self.update_timer.timeout.connect(self.update_display)
-        self.image_lock = threading.Lock()
-        self.total_malaria_positives = 0    
-
-
-        self.fov_image_cache = {}  # Add this line to create a cache for FOV images
-        self.max_cache_size = 50  # Adjust this value based on your RAM capacity and image sizes
+    def setup_fov_image_view(self):
+        self.fov_image_view.ui.roiBtn.hide()
+        self.fov_image_view.ui.menuBtn.hide()
+        self.fov_image_view.ui.histogram.hide()
+        self.fov_image_view.getView().setAspectLocked(True)
+        self.fov_image_view.getView().invertY(True)
+        self.fov_image_view.view.setMouseEnabled(x=False, y=False)
+        #self.fov_image_view.view.hideAxis('left')
+        #self.fov_image_view.view.hideAxis('bottom')
+        self.fov_image_view.view.setBackgroundColor((255, 255, 255))
 
 
     def shutdown(self):
@@ -209,6 +195,7 @@ class ImageAnalysisUI(QMainWindow):
 
     def update_cropped_images(self, fov_id, images, scores):
         with self.image_lock:
+            malaria_positives = 0
             for img, score in zip(images, scores):
                 img_hash = hash(img.tobytes())
                 if img_hash not in self.image_cache:
@@ -216,9 +203,10 @@ class ImageAnalysisUI(QMainWindow):
                     if overlay_img is not None:
                         qimg = self.create_qimage(overlay_img)
                         self.image_cache[img_hash] = (qimg, score)
-            self.update_stats() 
-
-        self.display_cropped_images(float(self.score_filter.text() or 0))
+                        if score >= MINIMUM_SCORE_THRESHOLD:
+                            malaria_positives += 1
+            self.update_malaria_positives(fov_id, malaria_positives)
+        self.update_cropped_images_display()
 
     def create_qimage(self, overlay_img):
         height, width, channel = overlay_img.shape
@@ -228,21 +216,21 @@ class ImageAnalysisUI(QMainWindow):
     def update_display(self):
         self.display_cropped_images(float(self.score_filter.text() or 0))
 
-    def display_cropped_images(self, min_score=0.31):
-        # Clear existing images
+    def update_cropped_images_display(self):
         for i in reversed(range(self.cropped_layout.count())): 
             self.cropped_layout.itemAt(i).widget().setParent(None)
 
-        window_width = self.width()
+        window_width = self.scroll_area.width()
         image_width = 100
-        num_columns = max(1, window_width // (image_width + 10))
+        num_columns = max(1, window_width // (image_width + 5))
 
         row, col = 0, 0
-        self.total_malaria_positives = 0  # Reset the count
+        self.total_malaria_positives = 0
         with self.image_lock:
             for img_hash, (qimg, score) in self.image_cache.items():
-                if score >= min_score:
-                    self.total_malaria_positives += 1  # Increment the count
+                if score >= MINIMUM_SCORE_THRESHOLD:
+                    self.total_malaria_positives += 1
+                    # ... (rest of the function remains the same)
                     pixmap = QPixmap.fromImage(qimg)
                     scaled_pixmap = pixmap.scaled(image_width, image_width, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                     
@@ -251,10 +239,9 @@ class ImageAnalysisUI(QMainWindow):
                     label.setAlignment(Qt.AlignCenter)
                     
                     widget = QWidget()
-                    layout = QVBoxLayout()
+                    layout = QVBoxLayout(widget)
                     layout.addWidget(label)
                     layout.addWidget(QLabel(f"Score: {score:.2f}"))
-                    widget.setLayout(layout)
                     
                     self.cropped_layout.addWidget(widget, row, col)
                     
@@ -263,13 +250,19 @@ class ImageAnalysisUI(QMainWindow):
                         col = 0
                         row += 1
 
-        self.cropped_layout.update()
-        self.update_stats()  # Update stats after recalculating malaria positives
+        self.scroll_widget.setLayout(self.cropped_layout)
+        self.update_stats()
 
+        self.scroll_widget.setLayout(self.cropped_layout)
+        self.update_stats()
 
     def update_fov_list(self, fov_id):
-        self.fov_list.addItem(fov_id)
-        self.fov_data[fov_id] = {'spots': 0, 'rbc_count': 0}
+        row_position = self.fov_table.rowCount()
+        self.fov_table.insertRow(row_position)
+        self.fov_table.setItem(row_position, 0, QTableWidgetItem(fov_id))
+        self.fov_table.setItem(row_position, 1, QTableWidgetItem("0"))  # Initial RBC Count
+        self.fov_table.setItem(row_position, 2, QTableWidgetItem("0"))  # Initial Malaria Positives
+        self.fov_data[fov_id] = {'rbc_count': 0, 'malaria_positives': 0}
 
     def update_fov_image(self, fov_id, dpc_image, fluorescent_image):
         # Combine DPC and fluorescent images
@@ -290,10 +283,14 @@ class ImageAnalysisUI(QMainWindow):
     def display_current_fov(self):
         if self.newest_fov_id and self.newest_fov_id in self.fov_image_cache:
             overlay_img = self.fov_image_cache[self.newest_fov_id]
-            
+
             # Update the PyQtGraph ImageView
             self.fov_image_view.setImage(overlay_img, autoLevels=False, levels=(0, 255))
-            self.fov_list.setCurrentRow(self.current_fov_index)
+
+            # Highlight the selected row in the table
+            row = self.find_fov_row(self.newest_fov_id)
+            if row is not None:
+                self.fov_table.selectRow(row)
         else:
             print(f"No FOV image available to display")
 
@@ -309,8 +306,8 @@ class ImageAnalysisUI(QMainWindow):
             self.newest_fov_id = list(self.fov_image_cache.keys())[self.current_fov_index]
             self.display_current_fov()
 
-    def fov_list_item_clicked(self, item):
-        fov_id = item.text()
+    def fov_table_item_clicked(self, item):
+        fov_id = self.fov_table.item(item.row(), 0).text()
         if fov_id in self.fov_image_cache:
             self.current_fov_index = list(self.fov_image_cache.keys()).index(fov_id)
             self.newest_fov_id = fov_id
@@ -321,8 +318,7 @@ class ImageAnalysisUI(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.display_current_fov()  # Refit the image when the window is resized
-        self.display_cropped_images(float(self.score_filter.text() or 0))
+        self.resize_timer.start(200)
 
     def create_overlay(self, dpc_image, fluorescent_image):
         # stack fluorescent and DPC images to 4xHxW
@@ -334,23 +330,25 @@ class ImageAnalysisUI(QMainWindow):
 
     def update_rbc_count(self, fov_id, count):
         self.fov_data[fov_id]['rbc_count'] = count
+        row = self.find_fov_row(fov_id)
+        if row is not None:
+            self.fov_table.setItem(row, 1, QTableWidgetItem(str(count)))
         self.update_stats()
 
+    def find_fov_row(self, fov_id):
+        for row in range(self.fov_table.rowCount()):
+            if self.fov_table.item(row, 0).text() == fov_id:
+                return row
+        return None
+    def update_malaria_positives(self, fov_id, count):
+        self.fov_data[fov_id]['malaria_positives'] = count
+        row = self.find_fov_row(fov_id)
+        if row is not None:
+            self.fov_table.setItem(row, 2, QTableWidgetItem(str(count)))
+        self.update_stats()
     def update_stats(self):
-        total_spots = sum(data['spots'] for data in self.fov_data.values())
         total_rbc = sum(data['rbc_count'] for data in self.fov_data.values())
-        self.stats_label.setText(f"Total Spots: {total_spots} | Total RBC Count: {total_rbc} | Total Malaria Positives: {self.total_malaria_positives}")
-
-
-    def apply_filter(self):
-        try:
-            min_score = float(self.score_filter.text())
-            self.display_cropped_images(min_score)
-        except ValueError:
-            print("Invalid score filter")
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.display_cropped_images(float(self.score_filter.text() or 0))
+        self.stats_label.setText(f"Total RBC Count: {total_rbc} | Total Malaria Positives: {self.total_malaria_positives}")
 
 class UIThread(QThread):
     update_fov = pyqtSignal(str)
