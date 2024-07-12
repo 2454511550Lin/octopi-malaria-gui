@@ -5,6 +5,8 @@ import numpy as np
 import imageio
 from PyQt5.QtWidgets import QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, QLineEdit, QPushButton, QScrollArea,QGridLayout,QSplitter
 from PyQt5.QtGui import QPixmap, QImage
+
+from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QSplitter, QLabel, QPushButton, QListWidget, QScrollArea, QGridLayout, QLineEdit,QFrame, QSizePolicy)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 import torch.multiprocessing as mp
 from queue import Empty
@@ -50,24 +52,52 @@ class ImageAnalysisUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Microscope Image Analysis")
-        self.setGeometry(100, 100, 1600, 900)  # Increased window size
+        self.setGeometry(100, 100, 1600, 900)
+        self.setStyleSheet("""
+            QMainWindow { background-color: #f0f0f0; }
+            QTabWidget::pane { border: 1px solid #d0d0d0; background-color: white; }
+            QTabBar::tab { background-color: #e0e0e0; padding: 8px 16px; margin-right: 2px; }
+            QTabBar::tab:selected { background-color: white; border-bottom: 2px solid #007bff; }
+            QPushButton { background-color: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; }
+            QPushButton:hover { background-color: #0056b3; }
+            QLineEdit { padding: 6px; border: 1px solid #d0d0d0; border-radius: 4px; }
+            QLabel { color: #333333; }
+        """)
 
-        # Create main widget and layout
         main_widget = QWidget()
         main_layout = QVBoxLayout()
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
 
-        # Create tab widget
+        # Create a horizontal layout for the top section
+        top_layout = QHBoxLayout()
+        main_layout.addLayout(top_layout)
+
+        # Add a spacer to push the shutdown button to the right
+        top_layout.addStretch()
+
+        # Create and style the shutdown button
+        self.shutdown_button = QPushButton("Shutdown")
+        self.shutdown_button.clicked.connect(self.shutdown)
+        self.shutdown_button.setFixedWidth(120)  # Make the button narrower
+        self.shutdown_button.setStyleSheet("""
+            QPushButton { 
+                background-color: #dc3545; 
+                font-weight: bold;
+                padding: 5px 10px;
+            }
+            QPushButton:hover { background-color: #c82333; }
+        """)
+        top_layout.addWidget(self.shutdown_button)
+
         tab_widget = QTabWidget()
         main_layout.addWidget(tab_widget)
 
-        # Create FOV tab
+        # FOV Tab
         fov_tab = QWidget()
         fov_layout = QVBoxLayout()
         fov_tab.setLayout(fov_layout)
 
-        # Create a splitter for FOV image and list
         splitter = QSplitter(Qt.Horizontal)
         fov_layout.addWidget(splitter)
 
@@ -76,12 +106,11 @@ class ImageAnalysisUI(QMainWindow):
         left_layout = QVBoxLayout()
         left_widget.setLayout(left_layout)
 
-        # Replace scroll area with a simple QLabel for the FOV image
         self.fov_image_label = QLabel()
         self.fov_image_label.setAlignment(Qt.AlignCenter)
+        self.fov_image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         left_layout.addWidget(self.fov_image_label)
 
-        # Add navigation buttons
         nav_layout = QHBoxLayout()
         self.prev_button = QPushButton("Previous")
         self.next_button = QPushButton("Next")
@@ -100,38 +129,39 @@ class ImageAnalysisUI(QMainWindow):
 
         self.fov_list = QListWidget()
         self.fov_list.itemClicked.connect(self.fov_list_item_clicked)
+        self.fov_list.setStyleSheet("""
+            QListWidget { border: 1px solid #d0d0d0; border-radius: 4px; }
+            QListWidget::item { padding: 6px; }
+            QListWidget::item:selected { background-color: #007bff; color: white; }
+        """)
         right_layout.addWidget(self.fov_list)
 
         splitter.addWidget(right_widget)
-
-        # Set the initial sizes of the splitter
-        splitter.setSizes([1600, 300])  # Adjust these values as needed
+        splitter.setSizes([1300, 300])
 
         tab_widget.addTab(fov_tab, "FOV List")
 
-        # Create Cropped Images tab
+        # Cropped Images Tab
         cropped_tab = QWidget()
         cropped_layout = QVBoxLayout()
         cropped_tab.setLayout(cropped_layout)
 
-        # Add filter controls
         filter_layout = QHBoxLayout()
         filter_layout.addWidget(QLabel("Min Score:"))
         self.score_filter = QLineEdit()
         self.score_filter.setPlaceholderText("Enter minimum score")
-        self.score_filter.setText("0.31")  # Set default value
-        self.score_filter.textChanged.connect(self.apply_filter) 
+        self.score_filter.setText("0.31")
+        self.score_filter.textChanged.connect(self.apply_filter)
         filter_layout.addWidget(self.score_filter)
         filter_button = QPushButton("Apply Filter")
         filter_button.clicked.connect(self.apply_filter)
         filter_layout.addWidget(filter_button)
         cropped_layout.addLayout(filter_layout)
 
-        # Add stats display
         self.stats_label = QLabel("Total Spots: 0 | Total RBC Count: 0")
+        self.stats_label.setStyleSheet("font-weight: bold; margin-top: 10px; margin-bottom: 10px;")
         cropped_layout.addWidget(self.stats_label)
 
-        # Add scrollable area for cropped images
         self.scroll_area = QScrollArea()
         self.scroll_widget = QWidget()
         self.cropped_layout = QGridLayout()
@@ -149,18 +179,11 @@ class ImageAnalysisUI(QMainWindow):
         self.fov_images = {}
         self.current_fov_index = -1
         self.newest_fov_id = None
-
         self.image_cache = {}
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self.update_display)
         self.image_lock = threading.Lock()
-
-        self.shutdown_button = QPushButton("Shutdown")
-        self.shutdown_button.clicked.connect(self.shutdown)
-        main_layout.addWidget(self.shutdown_button)
-
-        self.total_malaria_positives = 0
-
+        self.total_malaria_positives = 0    
     def shutdown(self):
         self.shutdown_signal.emit()
         self.close()
