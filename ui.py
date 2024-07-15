@@ -510,6 +510,18 @@ class UIThread(QThread):
         self.shutdown_signal.emit()
         QApplication.quit()  # This will close all windows
 
+    def closeEvent(self, event):
+        # This method is called when the window is about to be closed
+        reply = QMessageBox.question(self, 'Window Close', 'Are you sure you want to close the window?',
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+
+        if reply == QMessageBox.Yes:
+            self.shutdown()
+            event.accept()
+        else:
+            event.ignore()
+
+
 def ui_process(input_queue, output, shared_memory_final, shared_memory_classification, 
                shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
                shared_memory_timing, final_lock, timing_lock, start_event, shutdown_event):
