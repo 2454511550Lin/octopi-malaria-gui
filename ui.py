@@ -11,7 +11,9 @@ import threading
 from queue import Empty
 
 from utils import numpy2png_ui as numpy2png
-from virtual_list import VirtualImageListWidget
+from widgets import VirtualImageListWidget, ExpandableImageWidget
+from PyQt5.QtGui import QImage, QPixmap, QColor
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget, QPushButton, QLineEdit, QStyleFactory
 
 MINIMUM_SCORE_THRESHOLD = 0.31  # Adjust this value as needed
 
@@ -26,15 +28,54 @@ class ImageAnalysisUI(QMainWindow):
         self.start_event = start_event
         self.setWindowTitle("Microscope Image Analysis")
         self.setGeometry(100, 100, 1920, 1080)
+        
+        # Set the application style to Fusion for a more modern look
+        QApplication.setStyle(QStyleFactory.create('Fusion'))
+        
+        # Set a custom color palette
+        palette = self.palette()
+        palette.setColor(palette.Window, QColor("#ECF0F1"))
+        palette.setColor(palette.WindowText, QColor("#2C3E50"))
+        palette.setColor(palette.Button, QColor("#2C3E50"))
+        palette.setColor(palette.ButtonText, QColor("#FFFFFF"))
+        palette.setColor(palette.Highlight, QColor("#3498DB"))
+        self.setPalette(palette)
+        
         self.setStyleSheet("""
-            QMainWindow { background-color: #f0f0f0; }
-            QTabWidget::pane { border: 1px solid #d0d0d0; background-color: white; }
-            QTabBar::tab { background-color: #e0e0e0; padding: 8px 16px; margin-right: 2px; }
-            QTabBar::tab:selected { background-color: white; border-bottom: 2px solid #007bff; }
-            QPushButton { background-color: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; }
-            QPushButton:hover { background-color: #0056b3; }
-            QLineEdit { padding: 6px; border: 1px solid #d0d0d0; border-radius: 4px; }
-            QLabel { color: #333333; }
+            QMainWindow { background-color: #ECF0F1; }
+            QTabWidget::pane { border: 1px solid #BDC3C7; background-color: white; }
+            QTabBar::tab { 
+                background-color: #ECF0F1; 
+                padding: 8px 16px; 
+                margin-right: 2px; 
+                border-top-left-radius: 4px; 
+                border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected { 
+                background-color: white; 
+                border-bottom: 2px solid #3498DB; 
+            }
+            QPushButton { 
+                background-color: #2C3E50; 
+                color: white; 
+                border: none; 
+                padding: 8px 16px; 
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #34495E; }
+            QLineEdit { 
+                padding: 6px; 
+                border: 1px solid #BDC3C7; 
+                border-radius: 4px; 
+                background-color: white;
+            }
+            QLabel { color: #2C3E50; }
+            QTableWidget { 
+                gridline-color: #BDC3C7;
+                selection-background-color: #3498DB;
+            }
+            QTableWidget::item:hover { background-color: #3ea8c2; }
         """)
         self.image_lock = threading.Lock()
         self.central_widget = QWidget()
@@ -49,7 +90,7 @@ class ImageAnalysisUI(QMainWindow):
         self.fov_data = {}
         self.max_cache_size = 50
         self.current_fov_index = -1
-        self.newest_fov_id = None
+        self.selected_fov_id = None
 
         self.resize_timer = QTimer(self)
         self.resize_timer.setSingleShot(True)
@@ -64,7 +105,7 @@ class ImageAnalysisUI(QMainWindow):
         self.patient_id_label.setStyleSheet("""
             font-size: 18px;
             font-weight: bold;
-            color: #007bff;
+            color: #2C3E50;
             padding: 10px;
             background-color: #e6f2ff;
             border-radius: 5px;
@@ -156,19 +197,16 @@ class ImageAnalysisUI(QMainWindow):
         
         self.tab_widget.addTab(start_tab, "Start")
 
-        # FOV Tab
+        # Modify the FOV Tab
         fov_tab = QWidget()
-        fov_layout = QVBoxLayout(fov_tab)
+        fov_layout = QHBoxLayout(fov_tab)
         splitter = QSplitter(Qt.Horizontal)
         fov_layout.addWidget(splitter)
 
         # Left side: FOV image
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        self.fov_image_view = pg.ImageView()
-        self.setup_fov_image_view()
-        left_layout.addWidget(self.fov_image_view)
-
+        fov_widget = QWidget()
+        left_layout = QVBoxLayout(fov_widget)
+        
         nav_layout = QHBoxLayout()
         self.prev_button = QPushButton("Previous")
         self.next_button = QPushButton("Next")
@@ -178,11 +216,15 @@ class ImageAnalysisUI(QMainWindow):
         nav_layout.addWidget(self.next_button)
         left_layout.addLayout(nav_layout)
 
-        splitter.addWidget(left_widget)
+        self.fov_image_view = pg.ImageView()
+        self.setup_fov_image_view()
+        left_layout.addWidget(self.fov_image_view)
 
-        # Right side: FOV list
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
+        splitter.addWidget(fov_widget)
+
+        # Middle: FOV list
+        list_widget = QWidget()
+        middle_layout = QVBoxLayout(list_widget)
         self.fov_table = QTableWidget()
         self.fov_table.setColumnCount(3)
         self.fov_table.setHorizontalHeaderLabels(["FOV id", "RBCs", "Positives"])
@@ -191,15 +233,24 @@ class ImageAnalysisUI(QMainWindow):
         self.fov_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.fov_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.fov_table.itemClicked.connect(self.fov_table_item_clicked)
-        self.fov_table.setStyleSheet("""
-            QTableWidget { border: 1px solid #d0d0d0; border-radius: 4px; }
-            QTableWidget::item { padding: 6px; }
-            QTableWidget::item:selected { background-color: #007bff; color: white; }
-        """)
-        right_layout.addWidget(self.fov_table)
 
-        splitter.addWidget(right_widget)
-        splitter.setSizes([1300, 300])
+        middle_layout.addWidget(self.fov_table)
+        
+        # Right side: Positive Images
+        positive_widget = QWidget()
+        right_layout = QVBoxLayout(positive_widget)
+        self.positive_images_widget = ExpandableImageWidget()
+        right_layout.addWidget(self.positive_images_widget)
+
+
+        
+        splitter.addWidget(positive_widget)
+        splitter.addWidget(list_widget)
+
+
+        total_width = self.width()
+        unit = total_width / 10  # Because 3 + 3 + 1 = 7
+        splitter.setSizes([int(4*unit), int(4*unit), int(2*unit)])
 
         self.tab_widget.addTab(fov_tab, "FOVs List")
 
@@ -227,7 +278,7 @@ class ImageAnalysisUI(QMainWindow):
         self.fov_image_view.ui.roiBtn.hide()
         self.fov_image_view.ui.menuBtn.hide()
         self.fov_image_view.ui.histogram.hide()
-        self.fov_image_view.view.setMouseEnabled(x=False, y=False)
+        self.fov_image_view.view.setMouseEnabled(x=True, y=True)
         self.fov_image_view.view.setBackgroundColor((255, 255, 255))
 
 
@@ -251,7 +302,7 @@ class ImageAnalysisUI(QMainWindow):
         
         # Reset other variables
         self.current_fov_index = -1
-        self.newest_fov_id = None
+        self.selected_fov_id = None
         self.patient_id = ""
         
         # Clear the patient ID input and re-enable the start button
@@ -289,6 +340,8 @@ class ImageAnalysisUI(QMainWindow):
             self.fov_image_data[fov_id] = updated_images
 
         self.update_all_fov_images()
+        if fov_id == self.selected_fov_id:
+            self.update_positive_images(fov_id)
 
     def update_all_fov_images(self):
         self.virtual_image_list.clear()
@@ -327,19 +380,19 @@ class ImageAnalysisUI(QMainWindow):
             oldest_fov = next(iter(self.fov_image_cache))
             del self.fov_image_cache[oldest_fov]
         
-        self.newest_fov_id = fov_id
+        self.selected_fov_id = fov_id
         self.current_fov_index = list(self.fov_image_cache.keys()).index(fov_id)
         self.display_current_fov()
 
     def display_current_fov(self):
-        if self.newest_fov_id and self.newest_fov_id in self.fov_image_cache:
-            overlay_img = self.fov_image_cache[self.newest_fov_id]
+        if self.selected_fov_id and self.selected_fov_id in self.fov_image_cache:
+            overlay_img = self.fov_image_cache[self.selected_fov_id]
 
             # Update the PyQtGraph ImageView
             self.fov_image_view.setImage(overlay_img, autoLevels=False, levels=(0, 255))
 
             # Highlight the selected row in the table
-            row = self.find_fov_row(self.newest_fov_id)
+            row = self.find_fov_row(self.selected_fov_id)
             if row is not None:
                 self.fov_table.selectRow(row)
         else:
@@ -348,23 +401,28 @@ class ImageAnalysisUI(QMainWindow):
     def show_previous_fov(self):
         if self.current_fov_index > 0:
             self.current_fov_index -= 1
-            self.newest_fov_id = list(self.fov_image_cache.keys())[self.current_fov_index]
+            self.selected_fov_id = list(self.fov_image_cache.keys())[self.current_fov_index]
             self.display_current_fov()
 
     def show_next_fov(self):
         if self.current_fov_index < len(self.fov_image_cache) - 1:
             self.current_fov_index += 1
-            self.newest_fov_id = list(self.fov_image_cache.keys())[self.current_fov_index]
+            self.selected_fov_id = list(self.fov_image_cache.keys())[self.current_fov_index]
             self.display_current_fov()
 
     def fov_table_item_clicked(self, item):
         fov_id = self.fov_table.item(item.row(), 0).text()
         if fov_id in self.fov_image_cache:
             self.current_fov_index = list(self.fov_image_cache.keys()).index(fov_id)
-            self.newest_fov_id = fov_id
+            self.selected_fov_id = fov_id
             self.display_current_fov()
+            self.update_positive_images(fov_id)
         else:
             print(f"FOV {fov_id} not in cache. It may need to be loaded.")
+
+    def update_positive_images(self, fov_id):
+        if fov_id in self.fov_image_data:
+            self.positive_images_widget.update_images(self.fov_image_data[fov_id], fov_id)
 
 
     def resizeEvent(self, event):

@@ -100,7 +100,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
         time.sleep(1) 
 
         counter += 1
-        if counter == 5:
+        if counter == 40:
             counter = 0
             while start_event.is_set() and not shutdown_event.is_set():
                 time.sleep(1)
