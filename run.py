@@ -405,52 +405,55 @@ if __name__ == "__main__":
 
     # Create and start processes
     processes = [
-        mp.Process(target=image_acquisition, args=(dpc_queue, fluorescent_queue, shutdown_event,start_event)),
-        mp.Process(target=dpc_process, args=(dpc_queue, segmentation_queue, shutdown_event,start_event)),
-        mp.Process(target=fluorescent_spot_detection, args=(fluorescent_queue, fluorescent_detection_queue, shutdown_event,start_event)),
-        mp.Process(target=saving_process, args=(save_queue, cleanup_queue, shutdown_event,start_event)),
-        mp.Process(target=cleanup_process, args=(cleanup_queue, shutdown_event,start_event)),
+        mp.Process(target=image_acquisition, args=(dpc_queue, fluorescent_queue, shutdown_event,start_event), name="Image Acquisition"),
+        mp.Process(target=dpc_process, args=(dpc_queue, segmentation_queue, shutdown_event,start_event), name="DPC Process"),
+        mp.Process(target=fluorescent_spot_detection, args=(fluorescent_queue, fluorescent_detection_queue, shutdown_event,start_event), name="Fluorescent Spot Detection"),
+        mp.Process(target=saving_process, args=(save_queue, cleanup_queue, shutdown_event,start_event), name="Saving Process"),
+        mp.Process(target=cleanup_process, args=(cleanup_queue, shutdown_event,start_event), name="Cleanup Process")
     ]
 
     # Start the UI
     ui_process = mp.Process(target=ui_process, args=(ui_queue, cleanup_queue, shared_memory_final, shared_memory_classification, 
                                             shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
-                                            shared_memory_timing, final_lock, timing_lock,start_event,shutdown_event))
+                                            shared_memory_timing, final_lock, timing_lock,start_event,shutdown_event), name="UI Process")
 
     ui_process.start()
 
 
-    start_event.wait()
+    #start_event.wait()
 
 
     for p in processes:
         p.start()
 
     classification_thread = threading.Thread(target=classification_process, 
-                                             args=(classification_queue, fluorescent_detection_queue, save_queue, ui_queue, shutdown_event,start_event))
+                                             args=(classification_queue, fluorescent_detection_queue, save_queue, ui_queue, shutdown_event,start_event),name="Classification Process")
     segmentation_thread = threading.Thread(target=segmentation_process,
-                                           args=(segmentation_queue, classification_queue, shutdown_event,start_event)) 
+                                           args=(segmentation_queue, classification_queue, shutdown_event,start_event),name="Segmentation Process")
 
     classification_thread.start()
     segmentation_thread.start()
 
     try:
         while not shutdown_event.is_set():
-            time.sleep(1)
-            #print("Check the start event setting {}".format(start_event.is_set()))
+            time.sleep(1)    
     except KeyboardInterrupt:
         print("Stopping all processes...")
     finally:
         shutdown_event.set()
         for p in processes:
-            p.join(timeout=5)  # Give processes more time to shut down
+            p.join(timeout=0.1)  # Give processes more time to shut down
             if p.is_alive():
                 print(f"Force terminating process {p.name}")
                 p.terminate()
-        classification_thread.join(timeout=5)
-        segmentation_thread.join(timeout=5)
-        ui_process.join(timeout=5)
+        classification_thread.join(timeout=0.1)
+        segmentation_thread.join(timeout=0.1)
+        ui_process.join(timeout=0.1)
         if ui_process.is_alive():
             print("Force terminating UI process")
             ui_process.terminate()
         print("All processes have been shut down.")
+        if classification_thread.is_alive() or segmentation_thread.is_alive():
+            print("Force terminating classification and segmentation threads")
+            import os
+            os._exit(0)
