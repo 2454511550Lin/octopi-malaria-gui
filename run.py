@@ -57,8 +57,8 @@ def log_time(fov_id: str, process_name: str, event: str):
 
 from simulation import crop_image
 
-def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
-    start_event.wait()  # wait for the start event to be set
+def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_event: mp.Event):
+    #start_event.wait()  # wait for the start event to be set
     image_iterator = get_image()
 
     counter = 0 
@@ -100,7 +100,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
         time.sleep(0.5) 
 
         counter += 1
-        if counter == 20:
+        if counter == 40:
             time.sleep(2) 
             break
 
@@ -397,15 +397,24 @@ if __name__ == "__main__":
 
     # Create and start processes
     processes = [
-        mp.Process(target=image_acquisition, args=(dpc_queue, fluorescent_queue, shutdown_event,start_event)),
+        mp.Process(target=image_acquisition, args=(dpc_queue, fluorescent_queue, shutdown_event)),
         mp.Process(target=dpc_process, args=(dpc_queue, segmentation_queue, shutdown_event)),
         mp.Process(target=fluorescent_spot_detection, args=(fluorescent_queue, fluorescent_detection_queue, shutdown_event)),
         mp.Process(target=saving_process, args=(save_queue, cleanup_queue, shutdown_event)),
-        mp.Process(target=ui_process, args=(ui_queue, cleanup_queue, shared_memory_final, shared_memory_classification, 
-                                            shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
-                                            shared_memory_timing, final_lock, timing_lock,start_event)),
         mp.Process(target=cleanup_process, args=(cleanup_queue, shutdown_event)),
     ]
+
+    # Start the UI
+    ui_process = mp.Process(target=ui_process, args=(ui_queue, cleanup_queue, shared_memory_final, shared_memory_classification, 
+                                            shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
+                                            shared_memory_timing, final_lock, timing_lock,start_event,shutdown_event))
+
+    ui_process.start()
+
+    print("Check the start event setting {}".format(start_event.is_set()))
+
+    start_event.wait()
+
 
     for p in processes:
         p.start()
@@ -418,12 +427,8 @@ if __name__ == "__main__":
     classification_thread.start()
     segmentation_thread.start()
 
-    print("Check the start event setting {}".format(start_event.is_set()))
-
-    start_event.wait()
-
+    
     try:
-        # Wait for all processes to complete or for shutdown event
         while not shutdown_event.is_set():
             time.sleep(1)
     except KeyboardInterrupt:
@@ -431,9 +436,14 @@ if __name__ == "__main__":
     finally:
         shutdown_event.set()
         for p in processes:
-            p.join(timeout=0.1)
+            p.join(timeout=5)  # Give processes more time to shut down
             if p.is_alive():
+                print(f"Force terminating process {p.name}")
                 p.terminate()
-        classification_thread.join(timeout=0.1)
-        segmentation_thread.join(timeout=0.1)
+        classification_thread.join(timeout=5)
+        segmentation_thread.join(timeout=5)
+        ui_process.join(timeout=5)
+        if ui_process.is_alive():
+            print("Force terminating UI process")
+            ui_process.terminate()
         print("All processes have been shut down.")

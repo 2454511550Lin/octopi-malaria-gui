@@ -243,10 +243,42 @@ def numpy2png(img,filename,resize_factor=5):
 	x = resize_factor
 	img_overlay = cv2.resize(img_overlay, (int(img_overlay.shape[1]*x), int(img_overlay.shape[0]*x)), interpolation=cv2.INTER_NEAREST)
 	imageio.imwrite(filename + "_overlay.png", np.uint8(img_overlay))
-	#img_fluorescence = cv2.resize(img_fluorescence, (int(img_fluorescence.shape[1]*x), int(img_fluorescence.shape[0]*x)), interpolation=cv2.INTER_NEAREST)
-	#imageio.imwrite(filename + "_fluorescence.png", np.uint8(img_fluorescence))
-	#img_dpc = cv2.resize(img_dpc, (int(img_dpc.shape[1]*x), int(img_dpc.shape[0]*x)), interpolation=cv2.INTER_NEAREST)
-	#imageio.imwrite(filename + "_dpc.png", np.uint8(img_dpc))
+
+
+def numpy2png_ui(img, resize_factor=5):
+    try:
+        # Ensure the image is in the correct shape (H, W, C)
+        if img.shape[0] == 4:  # If the first dimension is 4, it's likely (C, H, W)
+            img = img.transpose(1, 2, 0)
+        
+        # Separate fluorescence and DPC channels
+        img_fluorescence = img[:, :, [2,1,0]]  # First 3 channels, but in reverse order
+        img_dpc = img[:, :, 3]  # Last channel
+
+        # Normalize the fluorescence image
+        epsilon = 1e-7
+        img_fluorescence = (img_fluorescence - img_fluorescence.min()) / (img_fluorescence.max() - img_fluorescence.min() + epsilon)
+        img_fluorescence = (img_fluorescence * 255).astype(np.uint8)
+
+        # Normalize the DPC image
+        img_dpc = (img_dpc - img_dpc.min()) / (img_dpc.max() - img_dpc.min())
+        img_dpc = (img_dpc * 255).astype(np.uint8)
+        img_dpc = np.dstack([img_dpc, img_dpc, img_dpc])  # Make it 3 channels
+
+        # Combine fluorescence and DPC
+        img_overlay = cv2.addWeighted(img_fluorescence, 0.64, img_dpc, 0.36, 0)
+
+        # Resize
+        if resize_factor is not None:
+            if resize_factor >=1:
+                img_overlay = cv2.resize(img_overlay, (img_overlay.shape[1]*resize_factor, img_overlay.shape[0]*resize_factor), interpolation=cv2.INTER_NEAREST)
+            if resize_factor < 1:
+                img_overlay = cv2.resize(img_overlay, (int(img_overlay.shape[1]*resize_factor), int(img_overlay.shape[0]*resize_factor)), interpolation=cv2.INTER_NEAREST)
+
+        return img_overlay
+    except Exception as e:
+        print(f"Error in numpy2png: {e}")
+        return None
 
 def save_flourescence_image(img,filename):
 	# 3 channels image

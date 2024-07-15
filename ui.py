@@ -1,7 +1,7 @@
 import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QListWidget, QLineEdit, QPushButton, QScrollArea, QGridLayout, 
-                             QSplitter, QSizePolicy, QTableWidget, QTableWidgetItem, QHeaderView,QAbstractItemView, QMessageBox)
+                             QLabel, QLineEdit, QPushButton,  
+                             QSplitter, QTableWidget, QTableWidgetItem, QHeaderView,QAbstractItemView, QMessageBox)
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 import pyqtgraph as pg
@@ -9,45 +9,13 @@ import numpy as np
 import torch.multiprocessing as mp
 import threading
 from queue import Empty
-import cv2
 
+from utils import numpy2png_ui as numpy2png
+from virtual_list import VirtualImageListWidget
 
 MINIMUM_SCORE_THRESHOLD = 0.31  # Adjust this value as needed
 
-def numpy2png(img, resize_factor=5):
-    try:
-        # Ensure the image is in the correct shape (H, W, C)
-        if img.shape[0] == 4:  # If the first dimension is 4, it's likely (C, H, W)
-            img = img.transpose(1, 2, 0)
-        
-        # Separate fluorescence and DPC channels
-        img_fluorescence = img[:, :, [2,1,0]]  # First 3 channels, but in reverse order
-        img_dpc = img[:, :, 3]  # Last channel
 
-        # Normalize the fluorescence image
-        epsilon = 1e-7
-        img_fluorescence = (img_fluorescence - img_fluorescence.min()) / (img_fluorescence.max() - img_fluorescence.min() + epsilon)
-        img_fluorescence = (img_fluorescence * 255).astype(np.uint8)
-
-        # Normalize the DPC image
-        img_dpc = (img_dpc - img_dpc.min()) / (img_dpc.max() - img_dpc.min())
-        img_dpc = (img_dpc * 255).astype(np.uint8)
-        img_dpc = np.dstack([img_dpc, img_dpc, img_dpc])  # Make it 3 channels
-
-        # Combine fluorescence and DPC
-        img_overlay = cv2.addWeighted(img_fluorescence, 0.64, img_dpc, 0.36, 0)
-
-        # Resize
-        if resize_factor is not None:
-            if resize_factor >=1:
-                img_overlay = cv2.resize(img_overlay, (img_overlay.shape[1]*resize_factor, img_overlay.shape[0]*resize_factor), interpolation=cv2.INTER_NEAREST)
-            if resize_factor < 1:
-                img_overlay = cv2.resize(img_overlay, (int(img_overlay.shape[1]*resize_factor), int(img_overlay.shape[0]*resize_factor)), interpolation=cv2.INTER_NEAREST)
-
-        return img_overlay
-    except Exception as e:
-        print(f"Error in numpy2png: {e}")
-        return None
 
 class ImageAnalysisUI(QMainWindow):
     shutdown_signal = pyqtSignal()
@@ -404,97 +372,6 @@ class ImageAnalysisUI(QMainWindow):
         self.start_button.setText("Analysis in Progress")
 
 
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QListView
-from PyQt5.QtCore import Qt, QAbstractListModel, QModelIndex, QRect, QSize
-from PyQt5.QtGui import QImage, QPixmap, QPainter
-from PyQt5.QtWidgets import QStyledItemDelegate
-
-class ImageItem:
-    def __init__(self, image, score, fov_id):
-        self.image = image
-        self.score = score
-        self.fov_id = fov_id
-
-class ImageListModel(QAbstractListModel):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.items = []
-
-    def rowCount(self, parent=QModelIndex()):
-        return len(self.items)
-
-    def data(self, index, role):
-        if not index.isValid():
-            return None
-
-        if role == Qt.DisplayRole:
-            return f"Score: {self.items[index.row()].score:.2f}"
-        elif role == Qt.DecorationRole:
-            return self.items[index.row()].image
-
-    def addItem(self, image, score, fov_id):
-        self.beginInsertRows(QModelIndex(), self.rowCount(), self.rowCount())
-        self.items.append(ImageItem(image, score, fov_id))
-        self.endInsertRows()
-
-    def clear(self):
-        self.beginResetModel()
-        self.items.clear()
-        self.endResetModel()
-
-class ImageDelegate(QStyledItemDelegate):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.item_size = QSize(150, 190)  # Adjusted size to accommodate FOV ID
-
-    def paint(self, painter, option, index):
-        image = index.data(Qt.DecorationRole)
-        text = index.data(Qt.DisplayRole)
-
-        painter.save()
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform)
-
-        # Draw image
-        pixmap = QPixmap.fromImage(image)
-        scaled_pixmap = pixmap.scaled(140, 140, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        image_rect = QRect(option.rect.x() + 5, option.rect.y() + 5, 140, 140)
-        painter.drawPixmap(image_rect, scaled_pixmap)
-
-        # Draw text (centered)
-        text_rect = QRect(option.rect.x(), option.rect.y() + 150, 150, 40)
-        painter.drawText(text_rect, Qt.AlignCenter, text)
-
-        painter.restore()
-
-    def sizeHint(self, option, index):
-        return self.item_size
-
-class VirtualImageListWidget(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.layout = QVBoxLayout(self)
-        self.list_view = QListView()
-        self.model = ImageListModel()
-        self.list_view.setModel(self.model)
-        self.list_view.setItemDelegate(ImageDelegate())
-        self.list_view.setViewMode(QListView.IconMode)
-        self.list_view.setResizeMode(QListView.Adjust)
-        self.list_view.setSpacing(10)
-        self.layout.addWidget(self.list_view)
-
-    def add_image(self, image, score, fov_id):
-        self.model.addItem(image, score, fov_id)
-
-    def clear(self):
-        self.model.clear()
-
-    def update_images(self, images, fov_id):
-        for image, score in images:
-            self.add_image(image, score, fov_id)
-
-
-
 
 class UIThread(QThread):
     update_fov = pyqtSignal(str)
@@ -585,13 +462,36 @@ class UIThread(QThread):
             temp_dict[process_name] = temp_process_dict
             self.shared_memory_timing[fov_id] = temp_dict
 
-    def connect_shutdown(self, shutdown_func):
-        self.window.shutdown_signal.connect(shutdown_func)
+    def shutdown(self):
+        self.shutdown_signal.emit()
+        QApplication.quit()  # This will close all windows
 
-def ui_process(input_queue: mp.Queue, output: mp.Queue, shared_memory_final, shared_memory_classification, shared_memory_segmentation, 
-               shared_memory_acquisition, shared_memory_dpc, shared_memory_timing, final_lock, timing_lock, start_event):
-    start_ui(input_queue, output, shared_memory_final, shared_memory_classification, shared_memory_segmentation, 
-             shared_memory_acquisition, shared_memory_dpc, shared_memory_timing, final_lock, timing_lock,start_event)
+def ui_process(input_queue, output, shared_memory_final, shared_memory_classification, 
+               shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
+               shared_memory_timing, final_lock, timing_lock, start_event, shutdown_event):
+    app = QApplication(sys.argv)
+    pg.setConfigOptions(imageAxisOrder='row-major')
+    window = ImageAnalysisUI(start_event)
+    
+    ui_thread = UIThread(input_queue, output, shared_memory_final, shared_memory_classification, 
+                         shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
+                         shared_memory_timing, final_lock, timing_lock, window)
+    ui_thread.update_fov.connect(window.update_fov_list)
+    ui_thread.update_images.connect(window.update_cropped_images)
+    ui_thread.update_rbc.connect(window.update_rbc_count)
+    ui_thread.update_fov_image.connect(window.update_fov_image)
+    
+    def handle_shutdown():
+        shutdown_event.set()
+        app.quit()
+    
+    window.shutdown_signal.connect(handle_shutdown)
+    
+    ui_thread.start()
+    
+    window.show()
+    app.exec_()
+    shutdown_event.set()  # Ensure shutdown_event is set when app closes
 
 def start_ui(input_queue, output, shared_memory_final, shared_memory_classification, shared_memory_segmentation, 
              shared_memory_acquisition, shared_memory_dpc, shared_memory_timing, final_lock, timing_lock,start_event):
