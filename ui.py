@@ -74,6 +74,20 @@ class ImageAnalysisUI(QMainWindow):
         # Top layout with shutdown button
         top_layout = QHBoxLayout()
         top_layout.addStretch()
+
+        self.new_patient_button = QPushButton("New Patient")
+        self.new_patient_button.clicked.connect(self.new_patient)
+        self.new_patient_button.setFixedWidth(120)
+        self.new_patient_button.setStyleSheet("""
+            QPushButton { 
+                background-color: #28a745; 
+                font-weight: bold;
+                padding: 5px 10px;
+            }
+            QPushButton:hover { background-color: #218838; }
+        """)
+        top_layout.addWidget(self.new_patient_button)
+
         self.shutdown_button = QPushButton("Shutdown")
         self.shutdown_button.clicked.connect(self.shutdown)
         self.shutdown_button.setFixedWidth(120)
@@ -220,6 +234,36 @@ class ImageAnalysisUI(QMainWindow):
     def shutdown(self):
         self.shutdown_signal.emit()
         self.close()
+
+    def new_patient(self):
+        # Clear all caches and data
+        self.image_cache.clear()
+        self.fov_image_cache.clear()
+        self.fov_data.clear()
+        self.fov_image_data.clear()
+        
+        # Reset UI elements
+        self.fov_table.setRowCount(0)
+        self.virtual_image_list.clear()
+        self.fov_image_view.clear()
+        self.patient_id_label.setText("")
+        self.stats_label.setText("Total RBC Count: 0 | Total Malaria Positives: 0")
+        
+        # Reset other variables
+        self.current_fov_index = -1
+        self.newest_fov_id = None
+        self.patient_id = ""
+        
+        # Clear the patient ID input and re-enable the start button
+        self.patient_id_input.clear()
+        self.start_button.setEnabled(True)
+        self.start_button.setText("Start Analysis")
+        
+        # Switch back to the start tab
+        self.tab_widget.setCurrentIndex(0)
+
+        # Signal the main process to stop
+        self.start_event.clear()
 
     def update_cropped_images(self, fov_id, images, scores):
         with self.image_lock:
@@ -369,7 +413,7 @@ class ImageAnalysisUI(QMainWindow):
         self.start_event.set()  # Signal the main process to start
         self.tab_widget.setCurrentIndex(1)  # Switch to FOVs List tab
         self.start_button.setEnabled(False)
-        self.start_button.setText("Analysis in Progress")
+        self.start_button.setText("In Progress")
 
 
 

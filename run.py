@@ -57,15 +57,15 @@ def log_time(fov_id: str, process_name: str, event: str):
 
 from simulation import crop_image
 
-def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_event: mp.Event):
-    #start_event.wait()  # wait for the start event to be set
+def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
+
     image_iterator = get_image()
 
     counter = 0 
 
     BEGIN = time.time()
     while not shutdown_event.is_set():
-        
+        start_event.wait()        
         # construct the iterator
         try:
             fov_id = next(image_iterator)
@@ -97,17 +97,21 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
             break
         
         #print(f"Image Acquisition: Processed FOV {fov_id}")
-        time.sleep(0.5) 
+        time.sleep(1) 
 
         counter += 1
-        if counter == 40:
-            time.sleep(2) 
-            break
+        if counter == 5:
+            counter = 0
+            while start_event.is_set() and not shutdown_event.is_set():
+                time.sleep(1)
+            
 
-from utils import generate_dpc, save_dpc_image,save_flourescence_image
+from utils import generate_dpc
 
-def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp.Event):
+def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
     while not shutdown_event.is_set():
+
+        start_event.wait()
         try:
             fov_id = input_queue.get(timeout=timeout)
             log_time(fov_id, "DPC Process", "start")
@@ -132,7 +136,7 @@ def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp
             continue
 
 
-def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp.Event):
+def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
     from interactive_m2unet_inference import M2UnetInteractiveModel as m2u
     import torch
     from scipy.ndimage import label
@@ -141,6 +145,7 @@ def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_
     model = m2u(pretrained_model=PATH, use_trt=False)
     
     while not shutdown_event.is_set():
+        start_event.wait()
         try:
             fov_id = input_queue.get(timeout=timeout)
             log_time(fov_id, "Segmentation Process", "start")
@@ -168,9 +173,10 @@ def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_
 
 from utils import remove_background, resize_image_cp, detect_spots, prune_blobs, settings
 
-def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp.Event):
+def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
     
     while not shutdown_event.is_set():
+        start_event.wait()
         try:
             fov_id = input_queue.get(timeout=timeout)
             log_time(fov_id, "Fluorescent Spot Detection", "start")
@@ -200,7 +206,7 @@ def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shu
 from utils import get_spot_images_from_fov
 from model import ResNet, run_model    
 
-def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Queue, save_queue: mp.Queue, ui_queue: mp.Queue,shutdown_event: mp.Event):
+def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Queue, save_queue: mp.Queue, ui_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
 
     import torch
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -220,6 +226,7 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
     model2.eval()
 
     while not shutdown_event.is_set():
+        start_event.wait()
         try:
             # Check segmentation queue
             try:
@@ -286,8 +293,9 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
 from utils import numpy2png
 import os
 
-def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Event):
+def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
     while not shutdown_event.is_set():
+        start_event.wait()
         try:
             fov_id = input_queue.get(timeout=timeout)
             log_time(fov_id, "Saving Process", "start")
@@ -349,8 +357,9 @@ def ui_process(input_queue: mp.Queue, output: mp.Queue):
 '''
         
 
-def cleanup_process(cleanup_queue: mp.Queue,shutdown_event: mp.Event):
+def cleanup_process(cleanup_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
     while not shutdown_event.is_set():
+        start_event.wait()
         try:
             fov_id = cleanup_queue.get(timeout=timeout)
             
@@ -359,7 +368,6 @@ def cleanup_process(cleanup_queue: mp.Queue,shutdown_event: mp.Event):
 
                 # Calculate processing times and generate visualization
                 timing_data = shared_memory_timing[fov_id]
-                total_time = timing_data['UI Process']['end'] - timing_data['Image Acquisition']['start']
                 
                 print(f"\n{'=' * 50}")
                 print(f"Report for FOV {fov_id}:")
@@ -376,7 +384,7 @@ def cleanup_process(cleanup_queue: mp.Queue,shutdown_event: mp.Event):
         except Empty:
             continue
 
-from ui import start_ui,ui_process
+from ui import ui_process
 
 if __name__ == "__main__":
     # Create queues
@@ -397,11 +405,11 @@ if __name__ == "__main__":
 
     # Create and start processes
     processes = [
-        mp.Process(target=image_acquisition, args=(dpc_queue, fluorescent_queue, shutdown_event)),
-        mp.Process(target=dpc_process, args=(dpc_queue, segmentation_queue, shutdown_event)),
-        mp.Process(target=fluorescent_spot_detection, args=(fluorescent_queue, fluorescent_detection_queue, shutdown_event)),
-        mp.Process(target=saving_process, args=(save_queue, cleanup_queue, shutdown_event)),
-        mp.Process(target=cleanup_process, args=(cleanup_queue, shutdown_event)),
+        mp.Process(target=image_acquisition, args=(dpc_queue, fluorescent_queue, shutdown_event,start_event)),
+        mp.Process(target=dpc_process, args=(dpc_queue, segmentation_queue, shutdown_event,start_event)),
+        mp.Process(target=fluorescent_spot_detection, args=(fluorescent_queue, fluorescent_detection_queue, shutdown_event,start_event)),
+        mp.Process(target=saving_process, args=(save_queue, cleanup_queue, shutdown_event,start_event)),
+        mp.Process(target=cleanup_process, args=(cleanup_queue, shutdown_event,start_event)),
     ]
 
     # Start the UI
@@ -411,7 +419,6 @@ if __name__ == "__main__":
 
     ui_process.start()
 
-    print("Check the start event setting {}".format(start_event.is_set()))
 
     start_event.wait()
 
@@ -420,17 +427,17 @@ if __name__ == "__main__":
         p.start()
 
     classification_thread = threading.Thread(target=classification_process, 
-                                             args=(classification_queue, fluorescent_detection_queue, save_queue, ui_queue, shutdown_event))
+                                             args=(classification_queue, fluorescent_detection_queue, save_queue, ui_queue, shutdown_event,start_event))
     segmentation_thread = threading.Thread(target=segmentation_process,
-                                           args=(segmentation_queue, classification_queue, shutdown_event)) 
+                                           args=(segmentation_queue, classification_queue, shutdown_event,start_event)) 
 
     classification_thread.start()
     segmentation_thread.start()
 
-    
     try:
         while not shutdown_event.is_set():
             time.sleep(1)
+            #print("Check the start event setting {}".format(start_event.is_set()))
     except KeyboardInterrupt:
         print("Stopping all processes...")
     finally:
