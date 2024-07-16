@@ -1,21 +1,19 @@
 import sys
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QLineEdit, QPushButton,  
-                             QSplitter, QTableWidget, QTableWidgetItem, QHeaderView,QAbstractItemView, QMessageBox)
-from PyQt5.QtGui import QPixmap, QImage
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
-import pyqtgraph as pg
 import numpy as np
-import torch.multiprocessing as mp
 import threading
 from queue import Empty
-
 from utils import numpy2png_ui as numpy2png
-from widgets import VirtualImageListWidget, ExpandableImageWidget
-from PyQt5.QtGui import QImage, QPixmap, QColor
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget, QPushButton, QLineEdit, QStyleFactory
-
 import numpy as np
+
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QSplitter, QTableWidget, QTableWidgetItem,
+    QHeaderView, QAbstractItemView, QMessageBox, QStyleFactory
+)
+from PyQt5.QtGui import QImage, QColor
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+import pyqtgraph as pg
+from widgets import VirtualImageListWidget, ExpandableImageWidget
 
 MINIMUM_SCORE_THRESHOLD = 0.31  # Adjust this value as needed
 PATH = None
@@ -89,13 +87,12 @@ class ImageAnalysisUI(QMainWindow):
         self.image_cache = {}
         self.fov_image_cache = {}
         self.fov_data = {}
-        self.max_cache_size = 1
+        self.max_cache_size = 10
         self.current_fov_index = -1
         self.selected_fov_id = None
 
         self.resize_timer = QTimer(self)
         self.resize_timer.setSingleShot(True)
-        self.resize_timer.timeout.connect(self.update_cropped_images_display)
 
         self.fov_image_data = {} 
 
@@ -259,7 +256,7 @@ class ImageAnalysisUI(QMainWindow):
         self.cropped_tab = QWidget()
         self.cropped_layout = QVBoxLayout(self.cropped_tab)
 
-        self.stats_label = QLabel("Total RBC Count: 0 | Total Malaria Positives: 0")
+        self.stats_label = QLabel("FoVs: 0 | Total RBC Count: 0 | Total Malaria Positives: 0")
         self.stats_label.setStyleSheet("""
             font-weight: bold; 
             margin-top: 10px; 
@@ -299,7 +296,7 @@ class ImageAnalysisUI(QMainWindow):
         self.virtual_image_list.clear()
         self.fov_image_view.clear()
         self.patient_id_label.setText("")
-        self.stats_label.setText("Total RBC Count: 0 | Total Malaria Positives: 0")
+        self.stats_label.setText("FoVs: 0 | Total RBC Count: 0 | Total Malaria Positives: 0")
         
         # Reset other variables
         self.current_fov_index = -1
@@ -341,7 +338,8 @@ class ImageAnalysisUI(QMainWindow):
             self.fov_image_data[fov_id] = updated_images
 
         self.update_all_fov_images()
-        if fov_id == self.selected_fov_id:
+
+        if fov_id == self.selected_fov_id and self.positive_images_widget.image_list.isVisible():
             self.update_positive_images(fov_id)
 
     def update_all_fov_images(self):
@@ -358,8 +356,6 @@ class ImageAnalysisUI(QMainWindow):
     def update_display(self):
         self.display_cropped_images(float(self.score_filter.text() or 0))
 
-    def update_cropped_images_display(self):
-        pass
 
     def update_fov_list(self, fov_id):
         row_position = self.fov_table.rowCount()
@@ -478,7 +474,7 @@ class ImageAnalysisUI(QMainWindow):
     def update_stats(self):
         total_rbc = sum(data['rbc_count'] for data in self.fov_data.values())
         total_positives = self.virtual_image_list.model.rowCount()
-        self.stats_label.setText(f"Total RBC Count: {total_rbc} | Total Malaria Positives: {total_positives}")
+        self.stats_label.setText(f"FoVs: {len(self.fov_data)} | Total RBC Count: {total_rbc} | Total Malaria Positives: {total_positives}")
 
 
     def start_analysis(self):

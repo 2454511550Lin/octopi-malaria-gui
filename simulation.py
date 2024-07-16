@@ -20,7 +20,9 @@ def get_fov_id(path):
 
 # now given the list of fov, create a iterator to read the images
 def get_image():
+
     fov_id = get_fov_id(PATH)
+    print(len(fov_id))
     for fov in fov_id:
         # yield left_half, right half, and floresence image sequentially
         yield fov
