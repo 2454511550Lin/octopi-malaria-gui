@@ -17,6 +17,7 @@ from widgets import VirtualImageListWidget, ExpandableImageWidget
 
 MINIMUM_SCORE_THRESHOLD = 0.31  # Adjust this value as needed
 PATH = None
+SILENT_MODE = False
 
 class ImageAnalysisUI(QMainWindow):
     shutdown_signal = pyqtSignal()
@@ -96,6 +97,8 @@ class ImageAnalysisUI(QMainWindow):
 
         self.fov_image_data = {} 
 
+        self.silent_mode = SILENT_MODE
+
     def setup_ui(self):
         # Patient ID Label (initially empty)
         self.patient_id_label = QLabel("")
@@ -114,6 +117,14 @@ class ImageAnalysisUI(QMainWindow):
         top_layout = QHBoxLayout()
         top_layout.addStretch()
 
+        self.silent_mode_toggle = QPushButton("Silent Mode: Off")
+        self.silent_mode_toggle.setCheckable(True)
+        self.silent_mode_toggle.clicked.connect(self.toggle_silent_mode)
+        self.silent_mode_toggle.setFixedWidth(170)
+        
+
+        top_layout.addWidget(self.silent_mode_toggle)
+
         self.new_patient_button = QPushButton("New Patient")
         self.new_patient_button.clicked.connect(self.new_patient)
         self.new_patient_button.setFixedWidth(120)
@@ -121,7 +132,6 @@ class ImageAnalysisUI(QMainWindow):
             QPushButton { 
                 background-color: #28a745; 
                 font-weight: bold;
-                padding: 5px 10px;
             }
             QPushButton:hover { background-color: #218838; }
         """)
@@ -134,7 +144,6 @@ class ImageAnalysisUI(QMainWindow):
             QPushButton { 
                 background-color: #dc3545; 
                 font-weight: bold;
-                padding: 5px 10px;
             }
             QPushButton:hover { background-color: #c82333; }
         """)
@@ -231,7 +240,6 @@ class ImageAnalysisUI(QMainWindow):
         self.fov_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.fov_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.fov_table.itemClicked.connect(self.fov_table_item_clicked)
-
         middle_layout.addWidget(self.fov_table)
         
         # Right side: Positive Images
@@ -240,14 +248,12 @@ class ImageAnalysisUI(QMainWindow):
         self.positive_images_widget = ExpandableImageWidget()
         right_layout.addWidget(self.positive_images_widget)
 
-
-        
         splitter.addWidget(positive_widget)
         splitter.addWidget(list_widget)
 
 
         total_width = self.width()
-        unit = total_width / 10  # Because 3 + 3 + 1 = 7
+        unit = total_width / 10  
         splitter.setSizes([int(4*unit), int(4*unit), int(2*unit)])
 
         self.tab_widget.addTab(fov_tab, "FOVs List")
@@ -279,6 +285,15 @@ class ImageAnalysisUI(QMainWindow):
         self.fov_image_view.view.setMouseEnabled(x=True, y=True)
         self.fov_image_view.view.setBackgroundColor((255, 255, 255))
 
+    def toggle_silent_mode(self):
+        self.silent_mode = not self.silent_mode
+        self.silent_mode_toggle.setText(f"Silent Mode: {'On' if self.silent_mode else 'Off'}")
+        if self.silent_mode:
+            self.fov_image_view.clear()
+            self.positive_images_widget.set_invisaible()
+        else:
+            self.positive_images_widget.set_visible()
+
 
     def shutdown(self):
         self.shutdown_signal.emit()
@@ -296,6 +311,7 @@ class ImageAnalysisUI(QMainWindow):
         self.virtual_image_list.clear()
         self.fov_image_view.clear()
         self.patient_id_label.setText("")
+        self.positive_images_widget.image_list.clear()
         self.stats_label.setText("FoVs: 0 | Total RBC Count: 0 | Total Malaria Positives: 0")
         
         # Reset other variables
@@ -313,6 +329,8 @@ class ImageAnalysisUI(QMainWindow):
 
         # Signal the main process to stop
         self.start_event.clear()
+
+
 
     def update_cropped_images(self, fov_id, images, scores):
         with self.image_lock:
@@ -379,7 +397,8 @@ class ImageAnalysisUI(QMainWindow):
         
         self.selected_fov_id = fov_id
         self.current_fov_index = list(self.fov_image_cache.keys()).index(fov_id)
-        self.display_current_fov()
+        if not self.silent_mode:
+            self.display_current_fov()
 
     def display_current_fov(self):
         if self.selected_fov_id and self.selected_fov_id in self.fov_image_cache:
@@ -416,7 +435,7 @@ class ImageAnalysisUI(QMainWindow):
     def fov_table_item_clicked(self, item):
         fov_id = self.fov_table.item(item.row(), 0).text()
         self.load_fov_cache(fov_id)
-    
+
     def load_fov_cache(self,fov_id):
         if fov_id in self.fov_image_cache:
             self.current_fov_index = list(self.fov_image_cache.keys()).index(fov_id)
@@ -439,7 +458,6 @@ class ImageAnalysisUI(QMainWindow):
     def update_positive_images(self, fov_id):
         if fov_id in self.fov_image_data:
             self.positive_images_widget.update_images(self.fov_image_data[fov_id], fov_id)
-
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

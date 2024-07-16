@@ -77,15 +77,12 @@ class VirtualImageListWidget(QWidget):
         self.list_view.setSpacing(10)
         self.layout.addWidget(self.list_view)
 
-    def add_image(self, image, score, fov_id):
-        self.model.addItem(image, score, fov_id)
-
     def clear(self):
         self.model.clear()
 
     def update_images(self, images, fov_id):
         for image, score in images:
-            self.add_image(image, score, fov_id)
+            self.model.addItem(image, score, fov_id)
 
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton
 from PyQt5.QtCore import Qt
@@ -111,17 +108,21 @@ class ExpandableImageWidget(QWidget):
         self.image_list.show()
 
     def toggle_images(self):
-        if self.image_list.isVisible():
-            self.image_list.hide()
-            self.toggle_button.setText("Show Positive Images")
-        else:
-            self.image_list.show()
-            self.toggle_button.setText("Hide Positive Images")
+        self.image_list.setVisible(not self.image_list.isVisible())
+        self.toggle_button.setText("Show Positive Images" if self.image_list.isHidden() else "Hide Positive Images")
 
     def update_images(self, images, fov_id):
         self.image_list.clear()
         self.image_list.update_images(images, fov_id)
         
         # Ensure the images are visible when updated
+        self.image_list.show()
+        self.toggle_button.setText("Hide Positive Images")
+
+    def set_invisaible(self):
+        self.image_list.hide()
+        self.toggle_button.setText("Show Positive Images")
+
+    def set_visible(self):
         self.image_list.show()
         self.toggle_button.setText("Hide Positive Images")
