@@ -33,8 +33,8 @@ final_lock = manager.Lock()
 
 # time lock
 timing_lock = manager.Lock()
-
 timeout = 0.1
+PATH = 'saved_images'
 
 def log_time(fov_id: str, process_name: str, event: str):
     with timing_lock:
@@ -100,7 +100,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
         time.sleep(1) 
 
         counter += 1
-        if counter == 40:
+        if counter == 10:
             counter = 0
             while start_event.is_set() and not shutdown_event.is_set():
                 time.sleep(1)
@@ -308,7 +308,6 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
                     scores = shared_memory_classification[fov_id]['scores']
                     
                     SAVE_NUMPYARRAY = True
-                    PATH = 'saved_images'
                     
                     if not SAVE_NUMPYARRAY: 
                         for i, cropped_image in enumerate(cropped_images):
@@ -321,6 +320,11 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
                         np.save(filename, cropped_images)
                         filename = os.path.join(PATH, f"{fov_id}_scores.npy")
                         np.save(filename, scores)
+                        filename = os.path.join(PATH, f"{fov_id}_overlay.npy")
+                        fluorescent_image = shared_memory_acquisition[fov_id]['fluorescent']
+                        dpc_image = shared_memory_dpc[fov_id]['dpc_image']
+                        img = np.stack([fluorescent_image[:,:,0], fluorescent_image[:,:,1], fluorescent_image[:,:,2], dpc_image], axis=0)
+                        np.save(filename, img)
 
                     temp_dict = shared_memory_final[fov_id]
                     temp_dict['saved'] = True
@@ -415,7 +419,7 @@ if __name__ == "__main__":
     # Start the UI
     ui_process = mp.Process(target=ui_process, args=(ui_queue, cleanup_queue, shared_memory_final, shared_memory_classification, 
                                             shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
-                                            shared_memory_timing, final_lock, timing_lock,start_event,shutdown_event), name="UI Process")
+                                            shared_memory_timing, final_lock, timing_lock,start_event,shutdown_event,PATH), name="UI Process")
 
     ui_process.start()
 

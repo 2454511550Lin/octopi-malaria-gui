@@ -15,9 +15,10 @@ from widgets import VirtualImageListWidget, ExpandableImageWidget
 from PyQt5.QtGui import QImage, QPixmap, QColor
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget, QPushButton, QLineEdit, QStyleFactory
 
+import numpy as np
+
 MINIMUM_SCORE_THRESHOLD = 0.31  # Adjust this value as needed
-
-
+PATH = None
 
 class ImageAnalysisUI(QMainWindow):
     shutdown_signal = pyqtSignal()
@@ -88,7 +89,7 @@ class ImageAnalysisUI(QMainWindow):
         self.image_cache = {}
         self.fov_image_cache = {}
         self.fov_data = {}
-        self.max_cache_size = 50
+        self.max_cache_size = 1
         self.current_fov_index = -1
         self.selected_fov_id = None
 
@@ -399,26 +400,45 @@ class ImageAnalysisUI(QMainWindow):
             print(f"No FOV image available to display")
 
     def show_previous_fov(self):
-        if self.current_fov_index > 0:
-            self.current_fov_index -= 1
-            self.selected_fov_id = list(self.fov_image_cache.keys())[self.current_fov_index]
-            self.display_current_fov()
+        current_row = self.fov_table.currentRow()
+        if current_row > 0:
+            previous_row = current_row - 1
+            fov_id = self.fov_table.item(previous_row, 0).text()
+            self.load_fov_cache(fov_id)
+            self.fov_table.selectRow(previous_row)
+            self.update_positive_images(fov_id)
 
     def show_next_fov(self):
-        if self.current_fov_index < len(self.fov_image_cache) - 1:
-            self.current_fov_index += 1
-            self.selected_fov_id = list(self.fov_image_cache.keys())[self.current_fov_index]
-            self.display_current_fov()
+        current_row = self.fov_table.currentRow()
+        if current_row < self.fov_table.rowCount() - 1:
+            next_row = current_row + 1
+            fov_id = self.fov_table.item(next_row, 0).text()
+            self.load_fov_cache(fov_id)
+            self.fov_table.selectRow(next_row)
+            self.update_positive_images(fov_id)
 
     def fov_table_item_clicked(self, item):
         fov_id = self.fov_table.item(item.row(), 0).text()
+        self.load_fov_cache(fov_id)
+    
+    def load_fov_cache(self,fov_id):
         if fov_id in self.fov_image_cache:
             self.current_fov_index = list(self.fov_image_cache.keys()).index(fov_id)
-            self.selected_fov_id = fov_id
-            self.display_current_fov()
-            self.update_positive_images(fov_id)
         else:
             print(f"FOV {fov_id} not in cache. It may need to be loaded.")
+            # load from the local disk
+            filename = f"{PATH}/{fov_id}_overlay.npy"
+            img_array = np.load(filename)
+            self.fov_image_cache[fov_id] = numpy2png(img_array, resize_factor=0.5)
+            # delete the oldest image
+            if len(self.fov_image_cache) > self.max_cache_size:
+                oldest_fov = next(iter(self.fov_image_cache))
+                del self.fov_image_cache[oldest_fov]
+
+        self.selected_fov_id = fov_id
+        self.display_current_fov()
+        self.update_positive_images(fov_id)
+            
 
     def update_positive_images(self, fov_id):
         if fov_id in self.fov_image_data:
@@ -582,7 +602,10 @@ class UIThread(QThread):
 
 def ui_process(input_queue, output, shared_memory_final, shared_memory_classification, 
                shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
-               shared_memory_timing, final_lock, timing_lock, start_event, shutdown_event):
+               shared_memory_timing, final_lock, timing_lock, start_event, shutdown_event, saving_path):
+    global PATH
+    PATH = saving_path
+
     app = QApplication(sys.argv)
     pg.setConfigOptions(imageAxisOrder='row-major')
     window = ImageAnalysisUI(start_event)
