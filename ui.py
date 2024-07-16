@@ -232,6 +232,12 @@ class ImageAnalysisUI(QMainWindow):
         # Middle: FOV list
         list_widget = QWidget()
         middle_layout = QVBoxLayout(list_widget)
+
+        self.stats_label_small = QLabel("FoVs: 0 | Total RBCs: 0 | Total Positives: 0")
+        # add on top of the fov table
+        middle_layout.addWidget(self.stats_label_small)
+
+
         self.fov_table = QTableWidget()
         self.fov_table.setColumnCount(3)
         self.fov_table.setHorizontalHeaderLabels(["FOV id", "RBCs", "Positives"])
@@ -243,14 +249,15 @@ class ImageAnalysisUI(QMainWindow):
         middle_layout.addWidget(self.fov_table)
         
         # Right side: Positive Images
+
         positive_widget = QWidget()
         right_layout = QVBoxLayout(positive_widget)
+
         self.positive_images_widget = ExpandableImageWidget()
         right_layout.addWidget(self.positive_images_widget)
 
         splitter.addWidget(positive_widget)
         splitter.addWidget(list_widget)
-
 
         total_width = self.width()
         unit = total_width / 10  
@@ -489,11 +496,12 @@ class ImageAnalysisUI(QMainWindow):
         if row is not None:
             self.fov_table.setItem(row, 2, QTableWidgetItem(str(count)))
         self.update_stats()
+
     def update_stats(self):
         total_rbc = sum(data['rbc_count'] for data in self.fov_data.values())
         total_positives = self.virtual_image_list.model.rowCount()
         self.stats_label.setText(f"FoVs: {len(self.fov_data)} | Total RBC Count: {total_rbc} | Total Malaria Positives: {total_positives}")
-
+        self.stats_label_small.setText(f"FoVs: {len(self.fov_data)} | Total RBCs: {total_rbc} | Total Positives: {total_positives}")
 
     def start_analysis(self):
         self.patient_id = self.patient_id_input.text().strip()
