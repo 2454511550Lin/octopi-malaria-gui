@@ -10,6 +10,8 @@ from simulation import get_image
 import threading
 from log import report
 
+from utils import SharedConfig
+
 # Existing shared memory managers
 manager = mp.Manager()
 shared_memory_acquisition = manager.dict()
@@ -34,7 +36,8 @@ final_lock = manager.Lock()
 # time lock
 timing_lock = manager.Lock()
 timeout = 0.1
-PATH = 'saved_images'
+PATH = SharedConfig()
+PATH.set_path('data')
 
 def log_time(fov_id: str, process_name: str, event: str):
     with timing_lock:
@@ -141,8 +144,8 @@ def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_
     import torch
     from scipy.ndimage import label
 
-    PATH = 'checkpoint/m2unet_model_flat_erode1_wdecay5_smallbatch/model_4000_11.pth'
-    model = m2u(pretrained_model=PATH, use_trt=False)
+    model_path = 'checkpoint/m2unet_model_flat_erode1_wdecay5_smallbatch/model_4000_11.pth'
+    model = m2u(pretrained_model=model_path, use_trt=False)
     
     while not shutdown_event.is_set():
         start_event.wait()
@@ -294,7 +297,11 @@ from utils import numpy2png
 import os
 
 def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
+    
+    
+    
     while not shutdown_event.is_set():
+
         start_event.wait()
         try:
             fov_id = input_queue.get(timeout=timeout)
@@ -308,19 +315,19 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
                     scores = shared_memory_classification[fov_id]['scores']
                     
                     SAVE_NUMPYARRAY = True
-                    
+                    save_path = PATH.get_path()
                     if not SAVE_NUMPYARRAY: 
                         for i, cropped_image in enumerate(cropped_images):
-                            filename = os.path.join(PATH, f"{fov_id}_{i}.png")
+                            filename = os.path.join(save_path, f"{fov_id}_{i}.png")
                             numpy2png(cropped_image,filename)
                             #dpc_image = shared_memory_dpc[fov_id]['dpc_image']*255
                             #save_dpc_image(dpc_image, f'data/{fov_id}.png')
                     else:
-                        filename = os.path.join(PATH, f"{fov_id}.npy")
+                        filename = os.path.join(save_path, f"{fov_id}.npy")
                         np.save(filename, cropped_images)
-                        filename = os.path.join(PATH, f"{fov_id}_scores.npy")
+                        filename = os.path.join(save_path, f"{fov_id}_scores.npy")
                         np.save(filename, scores)
-                        filename = os.path.join(PATH, f"{fov_id}_overlay.npy")
+                        filename = os.path.join(save_path, f"{fov_id}_overlay.npy")
                         fluorescent_image = shared_memory_acquisition[fov_id]['fluorescent']
                         dpc_image = shared_memory_dpc[fov_id]['dpc_image']
                         img = np.stack([fluorescent_image[:,:,0], fluorescent_image[:,:,1], fluorescent_image[:,:,2], dpc_image], axis=0)
