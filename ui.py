@@ -15,6 +15,8 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 import pyqtgraph as pg
 from widgets import VirtualImageListWidget, ExpandableImageWidget
 
+import time
+
 MINIMUM_SCORE_THRESHOLD = 0.31  # Adjust this value as needed
 PATH = None
 SILENT_MODE = False
@@ -26,7 +28,7 @@ class ImageAnalysisUI(QMainWindow):
     def __init__(self, start_event):
         super().__init__()
         self.start_event = start_event
-        self.setWindowTitle("Microscope Image Analysis")
+        self.setWindowTitle("Octopi")
         self.setGeometry(100, 100, 1920, 1080)
         
         # Set the application style to Fusion for a more modern look
@@ -99,7 +101,13 @@ class ImageAnalysisUI(QMainWindow):
 
         self.silent_mode = SILENT_MODE
 
+        self.first_fov_time = None
+        self.latest_fov_time = None
+
+       
+
     def setup_ui(self):
+
         # Patient ID Label (initially empty)
         self.patient_id_label = QLabel("")
         self.patient_id_label.setAlignment(Qt.AlignCenter)
@@ -233,6 +241,22 @@ class ImageAnalysisUI(QMainWindow):
         list_widget = QWidget()
         middle_layout = QVBoxLayout(list_widget)
 
+         # Add a new label for average processing time
+        self.avg_processing_time_label = QLabel("Avg Processing Time: N/A")
+        self.avg_processing_time_label.setStyleSheet("""
+            font-size: 14px;
+            color: #2C3E50;
+            padding: 5px;
+            background-color: #ECF0F1;
+            border-radius: 3px;
+        """)
+        middle_layout.addWidget(self.avg_processing_time_label)
+
+        # Timer to update average processing time
+        self.update_avg_timer = QTimer(self)
+        self.update_avg_timer.timeout.connect(self.update_avg_processing_time)
+        self.update_avg_timer.start(1000) 
+
         self.stats_label_small = QLabel("FoVs: 0 | Total RBCs: 0 | Total Positives: 0")
         # add on top of the fov table
         middle_layout.addWidget(self.stats_label_small)
@@ -337,7 +361,13 @@ class ImageAnalysisUI(QMainWindow):
         # Signal the main process to stop
         self.start_event.clear()
 
-
+    def update_avg_processing_time(self):
+        if self.first_fov_time is not None and self.latest_fov_time:
+            total_time = self.latest_fov_time - self.first_fov_time
+            avg_time = total_time / len(self.fov_data) 
+            self.avg_processing_time_label.setText(f"Avg Processing Time: {avg_time:.3f} s")
+        else:
+            self.avg_processing_time_label.setText("Avg Processing Time: N/A")
 
     def update_cropped_images(self, fov_id, images, scores):
         with self.image_lock:
@@ -381,7 +411,6 @@ class ImageAnalysisUI(QMainWindow):
     def update_display(self):
         self.display_cropped_images(float(self.score_filter.text() or 0))
 
-
     def update_fov_list(self, fov_id):
         row_position = self.fov_table.rowCount()
         self.fov_table.insertRow(row_position)
@@ -389,6 +418,10 @@ class ImageAnalysisUI(QMainWindow):
         self.fov_table.setItem(row_position, 1, QTableWidgetItem("0"))  # Initial RBC Count
         self.fov_table.setItem(row_position, 2, QTableWidgetItem("0"))  # Initial Malaria Positives
         self.fov_data[fov_id] = {'rbc_count': 0, 'malaria_positives': 0}
+
+        current_time = time.time()
+        if self.first_fov_time is None:
+            self.first_fov_time = current_time
 
     def update_fov_image(self, fov_id, dpc_image, fluorescent_image):
         # Combine DPC and fluorescent images
@@ -484,6 +517,8 @@ class ImageAnalysisUI(QMainWindow):
         if row is not None:
             self.fov_table.setItem(row, 1, QTableWidgetItem(str(count)))
         self.update_stats()
+
+        self.latest_fov_time = time.time()
 
     def find_fov_row(self, fov_id):
         for row in range(self.fov_table.rowCount()):
