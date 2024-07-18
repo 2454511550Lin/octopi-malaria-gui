@@ -97,7 +97,6 @@ class ExpandableImageWidget(QWidget):
         # Toggle button at the top
         self.toggle_button = QPushButton("Hide Positive Images")
         self.toggle_button.clicked.connect(self.toggle_images)
-        self.toggle_button.setFixedHeight(30)  # Adjust as needed
         self.layout.addWidget(self.toggle_button, alignment=Qt.AlignTop)
 
         # Image list

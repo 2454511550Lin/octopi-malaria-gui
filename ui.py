@@ -5,13 +5,16 @@ from queue import Empty
 from utils import numpy2png_ui as numpy2png
 import numpy as np
 
+import xml.etree.ElementTree as ET
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QSplitter, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QMessageBox, QStyleFactory, QFileDialog
+    QHeaderView, QAbstractItemView, QMessageBox, QStyleFactory, QFileDialog,
+    QComboBox, QCheckBox, QGroupBox, QGridLayout,QSpinBox
 )
 from PyQt5.QtGui import QImage, QColor
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+
 import pyqtgraph as pg
 from widgets import VirtualImageListWidget, ExpandableImageWidget
 
@@ -46,6 +49,7 @@ class ImageAnalysisUI(QMainWindow):
         self.setPalette(palette)
         
         self.setStyleSheet("""
+        * { font-size: 20px; }
             QMainWindow { background-color: #ECF0F1; }
             QTabWidget::pane { border: 1px solid #BDC3C7; background-color: white; }
             QTabBar::tab { 
@@ -130,14 +134,12 @@ class ImageAnalysisUI(QMainWindow):
         self.silent_mode_toggle = QPushButton("Silent Mode: Off")
         self.silent_mode_toggle.setCheckable(True)
         self.silent_mode_toggle.clicked.connect(self.toggle_silent_mode)
-        self.silent_mode_toggle.setFixedWidth(170)
-        
+
 
         top_layout.addWidget(self.silent_mode_toggle)
 
         self.new_patient_button = QPushButton("New Patient")
         self.new_patient_button.clicked.connect(self.new_patient)
-        self.new_patient_button.setFixedWidth(120)
         self.new_patient_button.setStyleSheet("""
             QPushButton { 
                 background-color: #28a745; 
@@ -149,7 +151,6 @@ class ImageAnalysisUI(QMainWindow):
 
         self.shutdown_button = QPushButton("Shutdown")
         self.shutdown_button.clicked.connect(self.shutdown)
-        self.shutdown_button.setFixedWidth(120)
         self.shutdown_button.setStyleSheet("""
             QPushButton { 
                 background-color: #dc3545; 
@@ -164,98 +165,115 @@ class ImageAnalysisUI(QMainWindow):
         self.tab_widget = QTabWidget()
         self.main_layout.addWidget(self.tab_widget)
 
-        # Start Tab
+         # Start Tab
         start_tab = QWidget()
-        start_layout = QVBoxLayout(start_tab)
-        
+        start_layout = QGridLayout(start_tab)
+
+        # Welcome label
         welcome_label = QLabel("Welcome to Octopi")
         welcome_label.setAlignment(Qt.AlignCenter)
-        welcome_label.setStyleSheet("font-size: 50px; margin-bottom: 20px;")
-        start_layout.addWidget(welcome_label)
+        welcome_label.setStyleSheet("font-size: 36px; margin-bottom: 20px;")
+        start_layout.addWidget(welcome_label, 0, 0, 1, 2)
+        start_layout.setRowStretch(0, 1)  # Add this line
+        start_layout.setRowStretch(1, 5)
 
-        # Directory selection with file system viewer
-        directory_container = QWidget()
-        directory_layout = QVBoxLayout(directory_container)
-        directory_label = QLabel("Select Save Directory:")
-        font = directory_label.font()
-        font.setPointSize(20)
-        directory_label.setFont(font)
-        directory_layout.addWidget(directory_label)
+        # Left column
+        left_column = QVBoxLayout()
 
-        directory_container = QWidget()
-        directory_layout = QHBoxLayout(directory_container)
-        directory_layout.setContentsMargins(0, 0, 0, 0)
-        directory_label = QLabel("Save Directory:")
-        font = directory_label.font()
-        font.setPointSize(20)
-        directory_label.setFont(font)
+        # Channel selection
+        channel_group = QGroupBox("Channel Selection")
+        channel_layout = QVBoxLayout(channel_group)
+        self.channel_combo = QComboBox()
+        self.load_channels()
+        channel_layout.addWidget(self.channel_combo)
+        left_column.addWidget(channel_group)
 
+        # Microscope controls
+        microscope_group = QGroupBox("Microscope Controls")
+        microscope_layout = QVBoxLayout(microscope_group)
+        self.live_button = QPushButton("LIVE")
+        self.live_button.clicked.connect(self.start_live_view)
+        self.loading_position_button = QPushButton("Loading Position")
+        self.loading_position_button.clicked.connect(self.move_to_loading_position)
+        microscope_layout.addWidget(self.live_button)
+        microscope_layout.addWidget(self.loading_position_button)
+        left_column.addWidget(microscope_group)
+
+        # Position selection
+        position_group = QGroupBox("Position Selection")
+        position_layout = QGridLayout(position_group)
+        position_layout.addWidget(QLabel("X:"), 0, 0)
+        self.x_input = QSpinBox()
+        self.x_input.setRange(1, 1000)  # Adjust the range as needed
+        self.x_input.setValue(1)  # Set default value to 1
+        self.x_input.setStyleSheet("QSpinBox { width: 80px; height: 25px; }")
+        position_layout.addWidget(self.x_input, 0, 1)
+        position_layout.addWidget(QLabel("Y:"), 1, 0)
+        self.y_input = QSpinBox()
+        self.y_input.setRange(1, 1000)  # Adjust the range as needed
+        self.y_input.setValue(1)  # Set default value to 1
+        self.y_input.setStyleSheet("QSpinBox { width: 80px; height: 25px; }")
+        position_layout.addWidget(self.y_input, 1, 1)
+        left_column.addWidget(position_group)
+
+        start_layout.addLayout(left_column, 1, 0)
+
+        # Right column
+        right_column = QVBoxLayout()
+
+        # Directory selection
+        directory_group = QGroupBox("Save Directory")
+        directory_layout = QHBoxLayout(directory_group)
         self.directory_input = QLineEdit()
-        font = self.directory_input.font()
-        font.setPointSize(16)
-        self.directory_input.setFont(font)
         self.directory_input.setPlaceholderText("Enter or select directory")
-        self.directory_input.setMinimumWidth(400)  # Adjust width as needed
-
         self.browse_button = QPushButton("Browse")
         self.browse_button.clicked.connect(self.browse_directory)
-        self.browse_button.setStyleSheet("""
-            QPushButton { 
-                color: white; 
-                font-weight: bold;
-                padding: 8px 16px;
-                font-size: 18px;
-            }
-        """)
-
-        directory_layout.addWidget(directory_label)
         directory_layout.addWidget(self.directory_input)
         directory_layout.addWidget(self.browse_button)
-        directory_layout.addStretch()
-        start_layout.addWidget(directory_container, alignment=Qt.AlignCenter)
+        right_column.addWidget(directory_group)
 
-        # Patient ID input (centered and compact)
-        patient_id_container = QWidget()
-        patient_id_layout = QHBoxLayout(patient_id_container)
-        patient_id_layout.setContentsMargins(0, 0, 0, 0)
-        patient_id_label = QLabel("Patient ID:")
-
-        font = patient_id_label.font()
-        font.setPointSize(20)  # Set the font size to 20
-        patient_id_label.setFont(font)
-
+        # Patient ID input
+        patient_group = QGroupBox("Patient Information")
+        patient_layout = QHBoxLayout(patient_group)
+        patient_layout.addWidget(QLabel("Patient ID:"))
         self.patient_id_input = QLineEdit()
+        patient_layout.addWidget(self.patient_id_input)
+        right_column.addWidget(patient_group)
 
-        # Set the font size of the QLineEdit
-        font = self.patient_id_input.font()
-        font.setPointSize(20)  # Set the font size to 20
-        self.patient_id_input.setFont(font)
+        # Image options
+        options_group = QGroupBox("Image saving options")
+        options_layout = QVBoxLayout(options_group)
+        self.raw_images_check = QCheckBox("Raw Images")
+        self.overlay_images_check = QCheckBox("Overlay Images")
+        self.positives_images_check = QCheckBox("Positives Images")
+        self.raw_images_check.setChecked(True)
+        self.overlay_images_check.setChecked(True)
+        self.positives_images_check.setChecked(True)
+        options_layout.addWidget(self.raw_images_check)
+        options_layout.addWidget(self.overlay_images_check)
+        options_layout.addWidget(self.positives_images_check)
+        right_column.addWidget(options_group)
 
-        self.patient_id_input = QLineEdit()
-        self.patient_id_input.setFixedWidth(200)  # Set a fixed width for the input field
-        font = self.patient_id_input.font()
-        font.setPointSize(20)  # Set the font size to 20
-        self.patient_id_input.setPlaceholderText("Enter Patient ID")
-        patient_id_layout.addWidget(patient_id_label)
-        patient_id_layout.addWidget(self.patient_id_input)
-        patient_id_layout.addStretch()
-        start_layout.addWidget(patient_id_container, alignment=Qt.AlignCenter|Qt.AlignBottom)
-        
+        # Start button
         self.start_button = QPushButton("Start Analysis")
         self.start_button.clicked.connect(self.start_analysis)
-        self.start_button.setFixedWidth(300)
         self.start_button.setStyleSheet("""
             QPushButton { 
-                background-color: #28a745; 
-                font-weight: bold;
-                padding: 30px 30px;
-                font-size: 30px;
+                background-color: #27ae60; 
+                font-size: 18px;
+                padding: 12px 24px;
             }
-            QPushButton:hover { background-color: #218838; }
+            QPushButton:hover { background-color: #2ecc71; }
         """)
-        start_layout.addWidget(self.start_button, alignment=Qt.AlignCenter)
-        
+        right_column.addWidget(self.start_button)
+
+        start_layout.addLayout(right_column, 1, 1)
+
         self.tab_widget.addTab(start_tab, "Start")
+
+        # set the column stretch
+        start_layout.setColumnStretch(0, 1)
+        start_layout.setColumnStretch(1, 2)
 
         # Modify the FOV Tab
         fov_tab = QWidget()
@@ -303,6 +321,9 @@ class ImageAnalysisUI(QMainWindow):
         self.update_avg_timer.start(1000) 
 
         self.stats_label_small = QLabel("FoVs: 0 | Total RBCs: 0 | Total Positives: 0")
+        self.stats_label_small.setStyleSheet("""
+            font-size: 14px;
+        """)     
         # add on top of the fov table
         middle_layout.addWidget(self.stats_label_small)
 
@@ -369,7 +390,25 @@ class ImageAnalysisUI(QMainWindow):
             self.positive_images_widget.set_invisaible()
         else:
             self.positive_images_widget.set_visible()
+    
+    def load_channels(self):
+        try:
+            tree = ET.parse('channel_configurations.xml')
+            root = tree.getroot()
+            channels = [mode.get('Name') for mode in root.findall('mode')]
+            self.channel_combo.addItems(channels)
+        except ET.ParseError as e:
+            print(f"Error parsing XML: {e}")
+        except FileNotFoundError:
+            print("channel_configurations.xml file not found")
 
+    def start_live_view(self):
+        # Placeholder function for starting live view
+        print("Starting live view...")
+
+    def move_to_loading_position(self):
+        # Placeholder function for moving to loading position
+        print("Moving to loading position...")
 
     def shutdown(self):
         self.shutdown_signal.emit()
