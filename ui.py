@@ -49,7 +49,7 @@ class ImageAnalysisUI(QMainWindow):
         self.setPalette(palette)
         
         self.setStyleSheet("""
-        * { font-size: 20px; }
+        * { font-size: 20px;  }
             QMainWindow { background-color: #ECF0F1; }
             QTabWidget::pane { border: 1px solid #BDC3C7; background-color: white; }
             QTabBar::tab { 
@@ -71,7 +71,7 @@ class ImageAnalysisUI(QMainWindow):
                 border-radius: 4px;
                 font-weight: bold;
             }
-            QPushButton:hover { background-color: #34495E; }
+            QPushButton:hover { background-color: #357eab; }
             QLineEdit { 
                 padding: 6px; 
                 border: 1px solid #BDC3C7; 
@@ -142,10 +142,10 @@ class ImageAnalysisUI(QMainWindow):
         self.new_patient_button.clicked.connect(self.new_patient)
         self.new_patient_button.setStyleSheet("""
             QPushButton { 
-                background-color: #28a745; 
+                background-color: #48abe8; 
                 font-weight: bold;
             }
-            QPushButton:hover { background-color: #218838; }
+            QPushButton:hover { background-color: #357eab; }
         """)
         top_layout.addWidget(self.new_patient_button)
 
@@ -169,13 +169,32 @@ class ImageAnalysisUI(QMainWindow):
         start_tab = QWidget()
         start_layout = QGridLayout(start_tab)
 
+
+        first_column = QVBoxLayout()
+        
         # Welcome label
         welcome_label = QLabel("Welcome to Octopi")
         welcome_label.setAlignment(Qt.AlignCenter)
         welcome_label.setStyleSheet("font-size: 36px; margin-bottom: 20px;")
-        start_layout.addWidget(welcome_label, 0, 0, 1, 2)
-        start_layout.setRowStretch(0, 1)  # Add this line
-        start_layout.setRowStretch(1, 5)
+        first_column.addWidget(welcome_label)
+
+        # Start button
+        self.start_button = QPushButton("Start Scanning")
+        self.start_button.clicked.connect(self.start_analysis)
+        # align the button to the center
+
+        self.start_button.setStyleSheet("""
+            QPushButton { 
+                background-color: #48abe8; 
+                font-size: 24px;
+                padding: 24px 48px;
+            }
+            QPushButton:hover { background-color: #357eab; }
+        """)
+       
+        first_column.addWidget(self.start_button, alignment=Qt.AlignCenter)
+
+        start_layout.addLayout(first_column, 0, 0)
 
         # Left column
         left_column = QVBoxLayout()
@@ -216,7 +235,7 @@ class ImageAnalysisUI(QMainWindow):
         position_layout.addWidget(self.y_input, 1, 1)
         left_column.addWidget(position_group)
 
-        start_layout.addLayout(left_column, 1, 0)
+        start_layout.addLayout(left_column, 0, 1)
 
         # Right column
         right_column = QVBoxLayout()
@@ -254,26 +273,14 @@ class ImageAnalysisUI(QMainWindow):
         options_layout.addWidget(self.positives_images_check)
         right_column.addWidget(options_group)
 
-        # Start button
-        self.start_button = QPushButton("Start Analysis")
-        self.start_button.clicked.connect(self.start_analysis)
-        self.start_button.setStyleSheet("""
-            QPushButton { 
-                background-color: #27ae60; 
-                font-size: 18px;
-                padding: 12px 24px;
-            }
-            QPushButton:hover { background-color: #2ecc71; }
-        """)
-        right_column.addWidget(self.start_button)
-
-        start_layout.addLayout(right_column, 1, 1)
+        start_layout.addLayout(right_column, 0, 2)
 
         self.tab_widget.addTab(start_tab, "Start")
 
         # set the column stretch
-        start_layout.setColumnStretch(0, 1)
-        start_layout.setColumnStretch(1, 2)
+        start_layout.setColumnStretch(0, 2)
+        start_layout.setColumnStretch(1, 1)
+        start_layout.setColumnStretch(2, 1)
 
         # Modify the FOV Tab
         fov_tab = QWidget()
@@ -361,11 +368,9 @@ class ImageAnalysisUI(QMainWindow):
 
         self.stats_label = QLabel("FoVs: 0 | Total RBC Count: 0 | Total Malaria Positives: 0")
         self.stats_label.setStyleSheet("""
-            font-weight: bold; 
             margin-top: 10px; 
             margin-bottom: 10px;
             font-size: 50px;
-            font-family: Arial, sans-serif;
             color: black;
         """)
         self.cropped_layout.addWidget(self.stats_label)
@@ -403,8 +408,27 @@ class ImageAnalysisUI(QMainWindow):
             print("channel_configurations.xml file not found")
 
     def start_live_view(self):
-        # Placeholder function for starting live view
-        print("Starting live view...")
+        
+        # check what is the text of the button
+        if self.live_button.text() == "LIVE (Running)":
+            self.live_button.setText("LIVE")
+            self.live_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #2C3E50;
+                }
+                QPushButton:hover { background-color: #357eab; }
+            """)
+
+        else:
+            self.live_button.setText("LIVE (Running)")
+        # change the color 
+            self.live_button.setStyleSheet("""
+                QPushButton { 
+                    background-color: #48abe8; 
+                }
+                QPushButton:hover { background-color: #357eab; }
+            """)
+
 
     def move_to_loading_position(self):
         # Placeholder function for moving to loading position
@@ -437,7 +461,7 @@ class ImageAnalysisUI(QMainWindow):
         # Clear the patient ID input and re-enable the start button
         self.patient_id_input.clear()
         self.start_button.setEnabled(True)
-        self.start_button.setText("Start Analysis")
+        self.start_button.setText("Start Scanning")
         
         # Switch back to the start tab
         self.tab_widget.setCurrentIndex(0)
@@ -651,7 +675,7 @@ class ImageAnalysisUI(QMainWindow):
         self.start_event.set()  # Signal the main process to start
         self.tab_widget.setCurrentIndex(1)  # Switch to FOVs List tab
         self.start_button.setEnabled(False)
-        self.start_button.setText("In Progress")
+        self.start_button.setText("Scanning in progress")
 
 
 
