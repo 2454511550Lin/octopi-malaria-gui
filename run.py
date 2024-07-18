@@ -36,8 +36,8 @@ final_lock = manager.Lock()
 # time lock
 timing_lock = manager.Lock()
 timeout = 0.1
-PATH = SharedConfig()
-PATH.set_path('data')
+shared_config = SharedConfig()
+shared_config.set_path('data')
 
 def log_time(fov_id: str, process_name: str, event: str):
     with timing_lock:
@@ -132,6 +132,14 @@ def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp
             
             with dpc_lock:
                 shared_memory_dpc[fov_id] = {'dpc_image': dpc_image}
+
+            with final_lock:
+                if shared_config.save_raw_images:
+                    save_path = shared_config.get_path()
+                    left_filename = f"{fov_id}_left_half.npy"
+                    right_filename = f"{fov_id}_right_half.npy"
+                    np.save(os.path.join(save_path, left_filename), left_half)
+                    np.save(os.path.join(save_path, right_filename), right_half)
             
             output_queue.put(fov_id)
             log_time(fov_id, "DPC Process", "end")
@@ -315,7 +323,7 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
                     scores = shared_memory_classification[fov_id]['scores']
                     
                     SAVE_NUMPYARRAY = True
-                    save_path = PATH.get_path()
+                    save_path = shared_config.get_path()
                     if not SAVE_NUMPYARRAY: 
                         for i, cropped_image in enumerate(cropped_images):
                             filename = os.path.join(save_path, f"{fov_id}_{i}.png")
@@ -323,15 +331,17 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
                             #dpc_image = shared_memory_dpc[fov_id]['dpc_image']*255
                             #save_dpc_image(dpc_image, f'data/{fov_id}.png')
                     else:
-                        filename = os.path.join(save_path, f"{fov_id}.npy")
-                        np.save(filename, cropped_images)
-                        filename = os.path.join(save_path, f"{fov_id}_scores.npy")
-                        np.save(filename, scores)
-                        filename = os.path.join(save_path, f"{fov_id}_overlay.npy")
-                        fluorescent_image = shared_memory_acquisition[fov_id]['fluorescent']
-                        dpc_image = shared_memory_dpc[fov_id]['dpc_image']
-                        img = np.stack([fluorescent_image[:,:,0], fluorescent_image[:,:,1], fluorescent_image[:,:,2], dpc_image], axis=0)
-                        np.save(filename, img)
+                        if shared_config.save_spot_images:
+                            filename = os.path.join(save_path, f"{fov_id}.npy")
+                            np.save(filename, cropped_images)
+                            filename = os.path.join(save_path, f"{fov_id}_scores.npy")
+                            np.save(filename, scores)
+                        if shared_config.save_overlay_images:
+                            filename = os.path.join(save_path, f"{fov_id}_overlay.npy")
+                            fluorescent_image = shared_memory_acquisition[fov_id]['fluorescent']
+                            dpc_image = shared_memory_dpc[fov_id]['dpc_image']
+                            img = np.stack([fluorescent_image[:,:,0], fluorescent_image[:,:,1], fluorescent_image[:,:,2], dpc_image], axis=0)
+                            np.save(filename, img)
 
                     temp_dict = shared_memory_final[fov_id]
                     temp_dict['saved'] = True
@@ -426,7 +436,7 @@ if __name__ == "__main__":
     # Start the UI
     ui_process = mp.Process(target=ui_process, args=(ui_queue, cleanup_queue, shared_memory_final, shared_memory_classification, 
                                             shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
-                                            shared_memory_timing, final_lock, timing_lock,start_event,shutdown_event,PATH), name="UI Process")
+                                            shared_memory_timing, final_lock, timing_lock,start_event,shutdown_event,shared_config), name="UI Process")
 
     ui_process.start()
 

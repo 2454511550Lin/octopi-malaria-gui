@@ -298,6 +298,9 @@ class SharedConfig:
     def __init__(self):
         self.manager = mp.Manager()
         self.path = self.manager.Value('s', '')  # 's' for string
+        self.save_raw_images = self.manager.Value('b', False)      # 'b' for boolean
+        self.save_overlay_images = self.manager.Value('b', False)  # 'b' for boolean
+        self.save_spot_images = self.manager.Value('b', False)     # 'b' for boolean
 
     def set_path(self, new_path):
         self.path.value = new_path

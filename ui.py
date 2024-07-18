@@ -29,10 +29,10 @@ class ImageAnalysisUI(QMainWindow):
     shutdown_signal = pyqtSignal()
     
 
-    def __init__(self, start_event,saving_path:SharedConfig):
+    def __init__(self, start_event,shared_config:SharedConfig):
         super().__init__()
         self.start_event = start_event
-        self.saving_path = saving_path
+        self.shared_config = shared_config
         self.setWindowTitle("Octopi")
         self.setGeometry(100, 100, 1920, 1080)
         
@@ -196,49 +196,16 @@ class ImageAnalysisUI(QMainWindow):
 
         start_layout.addLayout(first_column, 0, 0)
 
-        # Left column
-        left_column = QVBoxLayout()
+        # settings column
+        setting_column = QVBoxLayout()
 
-        # Channel selection
-        channel_group = QGroupBox("Channel Selection")
-        channel_layout = QVBoxLayout(channel_group)
-        self.channel_combo = QComboBox()
-        self.load_channels()
-        channel_layout.addWidget(self.channel_combo)
-        left_column.addWidget(channel_group)
-
-        # Microscope controls
-        microscope_group = QGroupBox("Microscope Controls")
-        microscope_layout = QVBoxLayout(microscope_group)
-        self.live_button = QPushButton("LIVE")
-        self.live_button.clicked.connect(self.start_live_view)
-        self.loading_position_button = QPushButton("Loading Position")
-        self.loading_position_button.clicked.connect(self.move_to_loading_position)
-        microscope_layout.addWidget(self.live_button)
-        microscope_layout.addWidget(self.loading_position_button)
-        left_column.addWidget(microscope_group)
-
-        # Position selection
-        position_group = QGroupBox("Position Selection")
-        position_layout = QGridLayout(position_group)
-        position_layout.addWidget(QLabel("X:"), 0, 0)
-        self.x_input = QSpinBox()
-        self.x_input.setRange(1, 1000)  # Adjust the range as needed
-        self.x_input.setValue(1)  # Set default value to 1
-        self.x_input.setStyleSheet("QSpinBox { width: 80px; height: 25px; }")
-        position_layout.addWidget(self.x_input, 0, 1)
-        position_layout.addWidget(QLabel("Y:"), 1, 0)
-        self.y_input = QSpinBox()
-        self.y_input.setRange(1, 1000)  # Adjust the range as needed
-        self.y_input.setValue(1)  # Set default value to 1
-        self.y_input.setStyleSheet("QSpinBox { width: 80px; height: 25px; }")
-        position_layout.addWidget(self.y_input, 1, 1)
-        left_column.addWidget(position_group)
-
-        start_layout.addLayout(left_column, 0, 1)
-
-        # Right column
-        right_column = QVBoxLayout()
+        # Patient ID input
+        patient_group = QGroupBox("Patient Information")
+        patient_layout = QHBoxLayout(patient_group)
+        patient_layout.addWidget(QLabel("Patient ID:"))
+        self.patient_id_input = QLineEdit()
+        patient_layout.addWidget(self.patient_id_input)
+        setting_column.addWidget(patient_group)
 
         # Directory selection
         directory_group = QGroupBox("Save Directory")
@@ -249,31 +216,68 @@ class ImageAnalysisUI(QMainWindow):
         self.browse_button.clicked.connect(self.browse_directory)
         directory_layout.addWidget(self.directory_input)
         directory_layout.addWidget(self.browse_button)
-        right_column.addWidget(directory_group)
-
-        # Patient ID input
-        patient_group = QGroupBox("Patient Information")
-        patient_layout = QHBoxLayout(patient_group)
-        patient_layout.addWidget(QLabel("Patient ID:"))
-        self.patient_id_input = QLineEdit()
-        patient_layout.addWidget(self.patient_id_input)
-        right_column.addWidget(patient_group)
+        setting_column.addWidget(directory_group)
 
         # Image options
-        options_group = QGroupBox("Image saving options")
+        options_group = QGroupBox("Image Saving Options")
         options_layout = QVBoxLayout(options_group)
         self.raw_images_check = QCheckBox("Raw Images")
         self.overlay_images_check = QCheckBox("Overlay Images")
-        self.positives_images_check = QCheckBox("Positives Images")
+        self.positives_images_check = QCheckBox("Spots Images")
         self.raw_images_check.setChecked(True)
         self.overlay_images_check.setChecked(True)
         self.positives_images_check.setChecked(True)
         options_layout.addWidget(self.raw_images_check)
         options_layout.addWidget(self.overlay_images_check)
         options_layout.addWidget(self.positives_images_check)
-        right_column.addWidget(options_group)
+        setting_column.addWidget(options_group)
 
-        start_layout.addLayout(right_column, 0, 2)
+        start_layout.addLayout(setting_column, 0, 1)
+        
+        # microscope column
+        microscope_column = QVBoxLayout()
+
+        # Channel selection
+        channel_group = QGroupBox("Channel Selection")
+        channel_layout = QVBoxLayout(channel_group)
+        self.channel_combo = QComboBox()
+        self.load_channels()
+        channel_layout.addWidget(self.channel_combo)
+        microscope_column.addWidget(channel_group)
+
+        # Microscope controls
+        microscope_group = QGroupBox("Microscope Controls")
+        microscope_layout = QVBoxLayout(microscope_group)
+        self.live_button = QPushButton("LIVE")
+        self.live_button.clicked.connect(self.start_live_view)
+        self.loading_position_button = QPushButton("To Loading Position")
+        self.loading_position_button.clicked.connect(self.move_to_loading_position)
+        microscope_layout.addWidget(self.live_button)
+        microscope_layout.addWidget(self.loading_position_button)
+        microscope_column.addWidget(microscope_group)
+
+        # Position selection
+        position_group = QGroupBox("Position Selection")
+        position_layout = QGridLayout(position_group)
+        position_layout.addWidget(QLabel("X:"), 0, 0)
+        self.x_input = QSpinBox()
+        self.x_input.setRange(1, 100)  # Adjust the range as needed
+        self.x_input.setValue(1)  # Set default value to 1
+        self.x_input.setStyleSheet("QSpinBox { width: 1px; height: 25px; }")
+        position_layout.addWidget(self.x_input, 0, 1)
+        position_layout.addWidget(QLabel("Y:"), 1, 0)
+        self.y_input = QSpinBox()
+        self.y_input.setRange(1, 100)  # Adjust the range as needed
+        self.y_input.setValue(1)  # Set default value to 1
+        self.y_input.setStyleSheet("QSpinBox { width: 1px; height: 25px; }")
+        position_layout.addWidget(self.y_input, 1, 1)
+        # shrink the first column to a certain ratio
+        position_layout.setColumnStretch(0, 1)
+        position_layout.setColumnStretch(1, 5)
+
+        microscope_column.addWidget(position_group)
+
+        start_layout.addLayout(microscope_column, 0, 2)
 
         self.tab_widget.addTab(start_tab, "Start")
 
@@ -431,8 +435,22 @@ class ImageAnalysisUI(QMainWindow):
 
 
     def move_to_loading_position(self):
-        # Placeholder function for moving to loading position
-        print("Moving to loading position...")
+        if self.loading_position_button.text() == "To Loading Position":
+            self.loading_position_button.setText("To Scanning Position")
+            self.loading_position_button.setStyleSheet("""
+                QPushButton { 
+                    background-color: #48abe8; 
+                }
+                QPushButton:hover { background-color: #357eab; }
+            """)
+        else:
+            self.loading_position_button.setText("To Loading Position")
+            self.loading_position_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #2C3E50;
+                }
+                QPushButton:hover { background-color: #357eab; }
+            """)
 
     def shutdown(self):
         self.shutdown_signal.emit()
@@ -595,7 +613,7 @@ class ImageAnalysisUI(QMainWindow):
         else:
             print(f"FOV {fov_id} not in cache. It may need to be loaded.")
             # load from the local disk
-            filename = f"{self.saving_path.get_path()}/{fov_id}_overlay.npy"
+            filename = f"{self.shared_config.get_path()}/{fov_id}_overlay.npy"
             img_array = np.load(filename)
             self.fov_image_cache[fov_id] = numpy2png(img_array, resize_factor=0.5)
             # delete the oldest image
@@ -670,14 +688,18 @@ class ImageAnalysisUI(QMainWindow):
         except OSError as e:
             QMessageBox.critical(self, "Error", f"Failed to create patient directory: {e}")
             return
-        self.saving_path.set_path(patient_directory)
+        
+        self.shared_config.set_path(patient_directory)
+        
+        self.shared_config.save_raw_images = self.raw_images_check.isChecked()
+        self.shared_config.save_overlay_images = self.overlay_images_check.isChecked()
+        self.shared_config.save_positives_images = self.positives_images_check.isChecked()
+
         self.patient_id_label.setText(f"Patient ID: {self.patient_id}")
         self.start_event.set()  # Signal the main process to start
         self.tab_widget.setCurrentIndex(1)  # Switch to FOVs List tab
         self.start_button.setEnabled(False)
         self.start_button.setText("Scanning in progress")
-
-
 
 class UIThread(QThread):
     update_fov = pyqtSignal(str)
@@ -786,11 +808,11 @@ class UIThread(QThread):
 
 def ui_process(input_queue, output, shared_memory_final, shared_memory_classification, 
                shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
-               shared_memory_timing, final_lock, timing_lock, start_event, shutdown_event, saving_path):
+               shared_memory_timing, final_lock, timing_lock, start_event, shutdown_event, shared_config):
 
     app = QApplication(sys.argv)
     pg.setConfigOptions(imageAxisOrder='row-major')
-    window = ImageAnalysisUI(start_event, saving_path)
+    window = ImageAnalysisUI(start_event, shared_config)
     
     ui_thread = UIThread(input_queue, output, shared_memory_final, shared_memory_classification, 
                          shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
