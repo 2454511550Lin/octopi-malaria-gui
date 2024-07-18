@@ -8,25 +8,29 @@ import numpy as np
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QSplitter, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QMessageBox, QStyleFactory
+    QHeaderView, QAbstractItemView, QMessageBox, QStyleFactory, QFileDialog
 )
 from PyQt5.QtGui import QImage, QColor
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 import pyqtgraph as pg
 from widgets import VirtualImageListWidget, ExpandableImageWidget
 
+import time, os
+
+from utils import SharedConfig
+
 MINIMUM_SCORE_THRESHOLD = 0.31  # Adjust this value as needed
-PATH = None
 SILENT_MODE = False
 
 class ImageAnalysisUI(QMainWindow):
     shutdown_signal = pyqtSignal()
     
 
-    def __init__(self, start_event):
+    def __init__(self, start_event,saving_path:SharedConfig):
         super().__init__()
         self.start_event = start_event
-        self.setWindowTitle("Microscope Image Analysis")
+        self.saving_path = saving_path
+        self.setWindowTitle("Octopi")
         self.setGeometry(100, 100, 1920, 1080)
         
         # Set the application style to Fusion for a more modern look
@@ -99,7 +103,13 @@ class ImageAnalysisUI(QMainWindow):
 
         self.silent_mode = SILENT_MODE
 
+        self.first_fov_time = None
+        self.latest_fov_time = None
+
+       
+
     def setup_ui(self):
+
         # Patient ID Label (initially empty)
         self.patient_id_label = QLabel("")
         self.patient_id_label.setAlignment(Qt.AlignCenter)
@@ -163,6 +173,47 @@ class ImageAnalysisUI(QMainWindow):
         welcome_label.setStyleSheet("font-size: 50px; margin-bottom: 20px;")
         start_layout.addWidget(welcome_label)
 
+        # Directory selection with file system viewer
+        directory_container = QWidget()
+        directory_layout = QVBoxLayout(directory_container)
+        directory_label = QLabel("Select Save Directory:")
+        font = directory_label.font()
+        font.setPointSize(20)
+        directory_label.setFont(font)
+        directory_layout.addWidget(directory_label)
+
+        directory_container = QWidget()
+        directory_layout = QHBoxLayout(directory_container)
+        directory_layout.setContentsMargins(0, 0, 0, 0)
+        directory_label = QLabel("Save Directory:")
+        font = directory_label.font()
+        font.setPointSize(20)
+        directory_label.setFont(font)
+
+        self.directory_input = QLineEdit()
+        font = self.directory_input.font()
+        font.setPointSize(16)
+        self.directory_input.setFont(font)
+        self.directory_input.setPlaceholderText("Enter or select directory")
+        self.directory_input.setMinimumWidth(400)  # Adjust width as needed
+
+        self.browse_button = QPushButton("Browse")
+        self.browse_button.clicked.connect(self.browse_directory)
+        self.browse_button.setStyleSheet("""
+            QPushButton { 
+                color: white; 
+                font-weight: bold;
+                padding: 8px 16px;
+                font-size: 18px;
+            }
+        """)
+
+        directory_layout.addWidget(directory_label)
+        directory_layout.addWidget(self.directory_input)
+        directory_layout.addWidget(self.browse_button)
+        directory_layout.addStretch()
+        start_layout.addWidget(directory_container, alignment=Qt.AlignCenter)
+
         # Patient ID input (centered and compact)
         patient_id_container = QWidget()
         patient_id_layout = QHBoxLayout(patient_id_container)
@@ -182,6 +233,8 @@ class ImageAnalysisUI(QMainWindow):
 
         self.patient_id_input = QLineEdit()
         self.patient_id_input.setFixedWidth(200)  # Set a fixed width for the input field
+        font = self.patient_id_input.font()
+        font.setPointSize(20)  # Set the font size to 20
         self.patient_id_input.setPlaceholderText("Enter Patient ID")
         patient_id_layout.addWidget(patient_id_label)
         patient_id_layout.addWidget(self.patient_id_input)
@@ -232,6 +285,22 @@ class ImageAnalysisUI(QMainWindow):
         # Middle: FOV list
         list_widget = QWidget()
         middle_layout = QVBoxLayout(list_widget)
+
+         # Add a new label for average processing time
+        self.avg_processing_time_label = QLabel("Avg Processing Time: N/A")
+        self.avg_processing_time_label.setStyleSheet("""
+            font-size: 14px;
+            color: #2C3E50;
+            padding: 5px;
+            background-color: #ECF0F1;
+            border-radius: 3px;
+        """)
+        middle_layout.addWidget(self.avg_processing_time_label)
+
+        # Timer to update average processing time
+        self.update_avg_timer = QTimer(self)
+        self.update_avg_timer.timeout.connect(self.update_avg_processing_time)
+        self.update_avg_timer.start(1000) 
 
         self.stats_label_small = QLabel("FoVs: 0 | Total RBCs: 0 | Total Positives: 0")
         # add on top of the fov table
@@ -337,8 +406,19 @@ class ImageAnalysisUI(QMainWindow):
         # Signal the main process to stop
         self.start_event.clear()
 
+    def update_avg_processing_time(self):
+        if self.first_fov_time is not None and self.latest_fov_time:
+            total_time = self.latest_fov_time - self.first_fov_time
+            avg_time = total_time / len(self.fov_data) 
+            self.avg_processing_time_label.setText(f"Avg Processing Time: {avg_time:.3f} s")
+        else:
+            self.avg_processing_time_label.setText("Avg Processing Time: N/A")
 
-
+    def browse_directory(self):
+        directory = QFileDialog.getExistingDirectory(self, "Select Directory")
+        if directory:
+            self.directory_input.setText(directory)
+    
     def update_cropped_images(self, fov_id, images, scores):
         with self.image_lock:
             malaria_positives = 0
@@ -381,7 +461,6 @@ class ImageAnalysisUI(QMainWindow):
     def update_display(self):
         self.display_cropped_images(float(self.score_filter.text() or 0))
 
-
     def update_fov_list(self, fov_id):
         row_position = self.fov_table.rowCount()
         self.fov_table.insertRow(row_position)
@@ -389,6 +468,10 @@ class ImageAnalysisUI(QMainWindow):
         self.fov_table.setItem(row_position, 1, QTableWidgetItem("0"))  # Initial RBC Count
         self.fov_table.setItem(row_position, 2, QTableWidgetItem("0"))  # Initial Malaria Positives
         self.fov_data[fov_id] = {'rbc_count': 0, 'malaria_positives': 0}
+
+        current_time = time.time()
+        if self.first_fov_time is None:
+            self.first_fov_time = current_time
 
     def update_fov_image(self, fov_id, dpc_image, fluorescent_image):
         # Combine DPC and fluorescent images
@@ -449,7 +532,7 @@ class ImageAnalysisUI(QMainWindow):
         else:
             print(f"FOV {fov_id} not in cache. It may need to be loaded.")
             # load from the local disk
-            filename = f"{PATH}/{fov_id}_overlay.npy"
+            filename = f"{self.saving_path.get_path()}/{fov_id}_overlay.npy"
             img_array = np.load(filename)
             self.fov_image_cache[fov_id] = numpy2png(img_array, resize_factor=0.5)
             # delete the oldest image
@@ -485,6 +568,8 @@ class ImageAnalysisUI(QMainWindow):
             self.fov_table.setItem(row, 1, QTableWidgetItem(str(count)))
         self.update_stats()
 
+        self.latest_fov_time = time.time()
+
     def find_fov_row(self, fov_id):
         for row in range(self.fov_table.rowCount()):
             if self.fov_table.item(row, 0).text() == fov_id:
@@ -505,10 +590,24 @@ class ImageAnalysisUI(QMainWindow):
 
     def start_analysis(self):
         self.patient_id = self.patient_id_input.text().strip()
+        directory = self.directory_input.text().strip()
+
         if not self.patient_id:
             QMessageBox.warning(self, "Input Error", "Please enter a Patient ID before starting the analysis.")
             return
-        
+
+        if not directory:
+            QMessageBox.warning(self, "Input Error", "Please enter or select a directory for saving data.")
+            return
+
+        # Create patient directory
+        patient_directory = os.path.join(directory, self.patient_id)
+        try:
+            os.makedirs(patient_directory, exist_ok=True)
+        except OSError as e:
+            QMessageBox.critical(self, "Error", f"Failed to create patient directory: {e}")
+            return
+        self.saving_path.set_path(patient_directory)
         self.patient_id_label.setText(f"Patient ID: {self.patient_id}")
         self.start_event.set()  # Signal the main process to start
         self.tab_widget.setCurrentIndex(1)  # Switch to FOVs List tab
@@ -625,12 +724,10 @@ class UIThread(QThread):
 def ui_process(input_queue, output, shared_memory_final, shared_memory_classification, 
                shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
                shared_memory_timing, final_lock, timing_lock, start_event, shutdown_event, saving_path):
-    global PATH
-    PATH = saving_path
 
     app = QApplication(sys.argv)
     pg.setConfigOptions(imageAxisOrder='row-major')
-    window = ImageAnalysisUI(start_event)
+    window = ImageAnalysisUI(start_event, saving_path)
     
     ui_thread = UIThread(input_queue, output, shared_memory_final, shared_memory_classification, 
                          shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 

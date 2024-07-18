@@ -292,3 +292,15 @@ def save_dpc_image(img,filename):
 	
 
 settings = {'spot_detection_downsize_factor': 4, 'spot_detection_threshold': 10}
+
+import torch.multiprocessing as mp
+class SharedConfig:
+    def __init__(self):
+        self.manager = mp.Manager()
+        self.path = self.manager.Value('s', '')  # 's' for string
+
+    def set_path(self, new_path):
+        self.path.value = new_path
+
+    def get_path(self):
+        return self.path.value
