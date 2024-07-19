@@ -197,7 +197,7 @@ def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp
                 shared_memory_dpc[fov_id] = {'dpc_image': dpc_image}
 
             with final_lock:
-                if shared_config.save_raw_images:
+                if shared_config.save_raw_images.value:
                     save_path = shared_config.get_path()
                     left_filename = f"{fov_id}_left_half.npy"
                     right_filename = f"{fov_id}_right_half.npy"
@@ -394,12 +394,12 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
                             #dpc_image = shared_memory_dpc[fov_id]['dpc_image']*255
                             #save_dpc_image(dpc_image, f'data/{fov_id}.png')
                     else:
-                        if shared_config.save_spot_images:
+                        if shared_config.save_spot_images.value:
                             filename = os.path.join(save_path, f"{fov_id}.npy")
                             np.save(filename, cropped_images)
                             filename = os.path.join(save_path, f"{fov_id}_scores.npy")
                             np.save(filename, scores)
-                        if shared_config.save_overlay_images:
+                        if shared_config.save_overlay_images.value:
                             filename = os.path.join(save_path, f"{fov_id}_overlay.npy")
                             fluorescent_image = shared_memory_acquisition[fov_id]['fluorescent']
                             dpc_image = shared_memory_dpc[fov_id]['dpc_image']

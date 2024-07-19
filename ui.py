@@ -732,6 +732,9 @@ class ImageAnalysisUI(QMainWindow):
         self.shared_config.save_overlay_images.value = self.overlay_images_check.isChecked()
         self.shared_config.save_spot_images.value = self.positives_images_check.isChecked()
 
+        print("Box is checked: ",self.raw_images_check.isChecked())
+        print("Flag is checked: ",self.shared_config.save_raw_images.value)
+
         self.patient_id_label.setText(f"Patient ID: {self.patient_id}")
         self.start_event.set()  # Signal the main process to start
         self.tab_widget.setCurrentIndex(1)  # Switch to FOVs List tab
