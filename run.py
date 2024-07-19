@@ -68,7 +68,9 @@ def image_acquisition_simulation(dpc_queue: mp.Queue, fluorescent_queue: mp.Queu
 
     BEGIN = time.time()
     while not shutdown_event.is_set():
-        if start_event.is_set():
+
+        #print("Check start event: ", start_event.is_set())
+        if not start_event.is_set():
             time.sleep(1)
             continue     
         # construct the iterator
@@ -346,12 +348,12 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                 segmentation_map = shared_memory_segmentation[fov_id]['segmentation_map']
                 spot_list = shared_memory_fluorescent[fov_id]['spot_indices']
 
-                #filtered_spots = seg_spot_filter_one_fov(segmentation_map, spot_list)
+                filtered_spots = seg_spot_filter_one_fov(segmentation_map, spot_list)
                 
                 dpc_image = shared_memory_dpc[fov_id]['dpc_image']
                 fluorescence_image = shared_memory_acquisition[fov_id]['fluorescent'].astype(float)/255
                 
-                cropped_images = get_spot_images_from_fov(fluorescence_image,dpc_image,spot_list,r=15)
+                cropped_images = get_spot_images_from_fov(fluorescence_image,dpc_image,filtered_spots,r=15)
                 cropped_images = cropped_images.transpose(0, 3, 1, 2)
 
                 scores1 = run_model(model1,DEVICE,cropped_images,4096)[:,1]
