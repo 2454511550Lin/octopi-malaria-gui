@@ -312,8 +312,25 @@ class SharedConfig:
         self.nx = self.manager.Value('i', 0)  # 'i' for integer
         self.ny = self.manager.Value('i', 0)  # 'i' for integer
 
+
+        self.position_lock = self.manager.Lock()
+        self.to_loading = self.manager.Value('b', False)  # 'b' for boolean
+        self.to_scanning = self.manager.Value('b', False)  # 'b' for boolean
+
     def set_path(self, new_path):
         self.path.value = new_path
 
     def get_path(self):
         return self.path.value
+    
+    def set_to_loading(self):
+        self.to_loading.value = True
+
+    def set_to_scanning(self):
+        self.to_scanning.value = True
+
+    def reset_to_loading(self):
+        self.to_loading.value = False
+
+    def reset_to_scanning(self):    
+        self.to_scanning.value = False

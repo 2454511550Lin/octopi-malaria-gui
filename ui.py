@@ -473,21 +473,28 @@ class ImageAnalysisUI(QMainWindow):
 
     def move_to_loading_position(self):
         if self.loading_position_button.text() == "To Loading Position":
-            self.loading_position_button.setText("To Scanning Position")
-            self.loading_position_button.setStyleSheet("""
-                QPushButton { 
-                    background-color: #48abe8; 
-                }
-                QPushButton:hover { background-color: #357eab; }
-            """)
+
+            with self.shared_config.position_lock:
+                if not self.shared_config.to_scanning.value:
+                    self.shared_config.set_to_loading()   
+                    self.loading_position_button.setText("To Scanning Position")
+                    self.loading_position_button.setStyleSheet("""
+                        QPushButton { 
+                            background-color: #48abe8; 
+                        }
+                        QPushButton:hover { background-color: #357eab; }
+                    """)
         else:
-            self.loading_position_button.setText("To Loading Position")
-            self.loading_position_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #2C3E50;
-                }
-                QPushButton:hover { background-color: #357eab; }
-            """)
+            with self.shared_config.position_lock:
+                if not self.shared_config.to_loading.value:
+                    self.shared_config.set_to_scanning()
+                    self.loading_position_button.setText("To Loading Position")
+                    self.loading_position_button.setStyleSheet("""
+                        QPushButton {
+                            background-color: #2C3E50;
+                        }
+                        QPushButton:hover { background-color: #357eab; }
+                    """)
 
     def shutdown(self):
         self.shutdown_signal.emit()
@@ -527,7 +534,7 @@ class ImageAnalysisUI(QMainWindow):
     def update_avg_processing_time(self):
         if self.first_fov_time is not None and self.latest_fov_time:
             total_time = self.latest_fov_time - self.first_fov_time
-            avg_time = total_time / len(self.fov_data) 
+            avg_time = total_time / len(self.fov_data) if len(self.fov_data) > 0 else 0
             self.avg_processing_time_label.setText(f"Avg Processing Time: {avg_time:.3f} s")
         else:
             self.avg_processing_time_label.setText("Avg Processing Time: N/A")
@@ -716,6 +723,10 @@ class ImageAnalysisUI(QMainWindow):
 
         if not directory:
             QMessageBox.warning(self, "Input Error", "Please enter or select a directory for saving data.")
+            return
+        
+        if self.loading_position_button.text() == "To Scanning Position":
+            QMessageBox.warning(self, "Input Error", "Please return to the loading position before starting the analysis.")
             return
 
         # Create patient directory

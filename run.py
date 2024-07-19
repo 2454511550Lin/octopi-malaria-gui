@@ -68,7 +68,9 @@ def image_acquisition_simulation(dpc_queue: mp.Queue, fluorescent_queue: mp.Queu
 
     BEGIN = time.time()
     while not shutdown_event.is_set():
-        start_event.wait()        
+        if start_event.is_set():
+            time.sleep(1)
+            continue     
         # construct the iterator
         try:
             fov_id = next(image_iterator)
@@ -120,8 +122,28 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
     microscope.home_xyz()
 
     while not shutdown_event.is_set():
-        start_event.wait()        
-        # construct the iterator
+
+        # check if to loading or to scanning position
+        
+        if not start_event.is_set():
+
+            with shared_config.position_lock:
+                
+                if shared_config.to_scanning.value and not shared_config.to_loading.value:
+                    print("Moving to scanning position")
+                    microscope.to_scanning_position()
+                    shared_config.reset_to_scanning()
+                    continue
+                
+                if shared_config.to_loading.value and not shared_config.to_scanning.value:
+                    print("Moving to loading position")
+                    microscope.to_loading_position()
+                    shared_config.reset_to_loading()
+                    continue
+
+            time.sleep(1)
+            continue
+
         try:
             for x in range(shared_config.nx.value):
                 for y in range(shared_config.ny.value):
@@ -417,28 +439,6 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
         
         except Empty:
             continue
-
-'''
-def ui_process(input_queue: mp.Queue, output: mp.Queue):
-    while True:
-        try:
-            fov_id = input_queue.get(timeout=timeout)
-            log_time(fov_id, "UI Process", "start")
-            
-            with final_lock:
-                if fov_id in shared_memory_final and not shared_memory_final[fov_id]['displayed']:
-                    # Placeholder for UI update
-                    temp_dict = shared_memory_final[fov_id]
-                    temp_dict['displayed'] = True
-                    shared_memory_final[fov_id] = temp_dict
-
-                    if shared_memory_final[fov_id]['saved']:
-                        output.put(fov_id)
-            
-                    log_time(fov_id, "UI Process", "end")
-        except Empty:
-            continue
-'''
         
 
 def cleanup_process(cleanup_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
