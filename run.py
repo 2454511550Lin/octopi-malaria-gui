@@ -60,7 +60,7 @@ def log_time(fov_id: str, process_name: str, event: str):
 
 from simulation import crop_image
 
-def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
+def image_acquisition_simulation(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
 
     image_iterator = get_image()
 
@@ -108,6 +108,69 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
             while start_event.is_set() and not shutdown_event.is_set():
                 time.sleep(1)
             
+from microscope import Microscope
+def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
+
+    microscope = Microscope(is_simulation=True)
+
+    microscope.camera.start_streaming()
+    microscope.camera.set_software_triggered_acquisition()
+    microscope.camera.disable_callback()
+
+    microscope.home_xyz()
+
+    while not shutdown_event.is_set():
+        start_event.wait()        
+        # construct the iterator
+        try:
+            for x in range(1):
+                for y in range(1):
+
+                    fov_id = f"{x}_{y}_0"
+                    log_time(fov_id, "Image Acquisition", "start")
+
+                    channels = ["BF LED matrix left half","BF LED matrix right half","Fluorescence 405 nm Ex"]
+
+                    microscope.set_channel(channels[0])
+                    left_half = microscope.acquire_image()
+                    microscope.set_channel(channels[1])
+                    right_half = microscope.acquire_image()
+                    microscope.set_channel(channels[2])
+                    fluorescent = microscope.acquire_image()
+                    # ducplicate fluorescent from 3k x 3k to 3k x 3k x 3
+                    fluorescent = np.stack([fluorescent,fluorescent,fluorescent],axis=2)
+
+
+                    # left and right should be 2800x2800, if three channels, convert to grayscale
+                    #if left_half.shape[2] == 3:
+                    #    left_half = left_half[:,:,0]
+                    #if right_half.shape[2] == 3:
+                    #    right_half = right_half[:,:,0]
+
+                    print (left_half.shape, right_half.shape, fluorescent.shape)
+
+                    shared_memory_acquisition[fov_id] = {
+                        'left_half': crop_image(left_half),
+                        'right_half': crop_image(right_half),
+                        'fluorescent': crop_image(fluorescent)
+                    }
+
+                    dpc_queue.put(fov_id)
+                    fluorescent_queue.put(fov_id)
+
+                    log_time(fov_id, "Image Acquisition", "end")
+
+                    # move to next position
+                    #microscope.move_y(0.9)
+                #microscope.move_x(0.9)
+        
+        except Exception as e:
+            print(f"Error in image acquisition: {e}")
+
+        while start_event.is_set() and not shutdown_event.is_set():
+            time.sleep(1)
+
+
 
 from utils import generate_dpc
 

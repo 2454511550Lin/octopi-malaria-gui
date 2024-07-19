@@ -395,6 +395,7 @@ class ImageAnalysisUI(QMainWindow):
         options_layout.addWidget(self.positives_images_check)
         settings_layout.addWidget(options_group, alignment=Qt.AlignTop | Qt.AlignLeft)
 
+
         # Position selection
         position_group = QGroupBox("Field of View Selection")
         position_layout = QGridLayout(position_group)
@@ -727,9 +728,9 @@ class ImageAnalysisUI(QMainWindow):
         
         self.shared_config.set_path(patient_directory)
         
-        self.shared_config.save_raw_images = self.raw_images_check.isChecked()
-        self.shared_config.save_overlay_images = self.overlay_images_check.isChecked()
-        self.shared_config.save_positives_images = self.positives_images_check.isChecked()
+        self.shared_config.save_raw_images.value = self.raw_images_check.isChecked()
+        self.shared_config.save_overlay_images.value = self.overlay_images_check.isChecked()
+        self.shared_config.save_spot_images.value = self.positives_images_check.isChecked()
 
         self.patient_id_label.setText(f"Patient ID: {self.patient_id}")
         self.start_event.set()  # Signal the main process to start

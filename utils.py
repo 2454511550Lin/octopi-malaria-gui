@@ -181,17 +181,25 @@ def process_spots(I_background_removed,I_raw,spot_list,i,j,k,settings,I_mask=Non
 	spot_data_pd = extract_spot_data(I_background_removed,I_raw,spot_list,i,j,k,settings)
 	return spot_list, spot_data_pd
 
-def generate_dpc(I1,I2,use_gpu=False):
-	if use_gpu:
-		# img_dpc = cp.divide(img_left_gpu - img_right_gpu, img_left_gpu + img_right_gpu)
-		# to add
-		I_dpc = 0
-	else:
-		I_dpc = np.divide(I1-I2,I1+I2)
-		I_dpc = I_dpc + 0.5
-	I_dpc[I_dpc<0] = 0
-	I_dpc[I_dpc>1] = 1
-	return I_dpc
+def generate_dpc(I1, I2, use_gpu=False):
+    if use_gpu:
+        # GPU implementation is not provided, so I'll leave a placeholder
+        # You might want to implement this using a GPU library like CuPy
+        I_dpc = 0  # Placeholder
+    else:
+        # Add a small constant to avoid divide-by-zero
+        epsilon = 1e-10
+        
+        # Compute the sum once
+        I_sum = I1 + I2 + epsilon
+        
+        # Compute DPC
+        I_dpc = np.divide(I1 - I2, I_sum)
+        
+        # Shift and clip values
+        I_dpc = np.clip(I_dpc + 0.5, 0, 1)
+    
+    return I_dpc
 
 def get_spot_images_from_fov(I_fluorescence,I_dpc,spot_list,r=15):
     if(len(I_dpc.shape)==3):
@@ -261,7 +269,7 @@ def numpy2png_ui(img, resize_factor=5):
         img_fluorescence = (img_fluorescence * 255).astype(np.uint8)
 
         # Normalize the DPC image
-        img_dpc = (img_dpc - img_dpc.min()) / (img_dpc.max() - img_dpc.min())
+        img_dpc = (img_dpc - img_dpc.min()) / (img_dpc.max() - img_dpc.min() + epsilon)
         img_dpc = (img_dpc * 255).astype(np.uint8)
         img_dpc = np.dstack([img_dpc, img_dpc, img_dpc])  # Make it 3 channels
 

@@ -645,7 +645,7 @@ if config_files:
         with open("cache/config_file_path.txt", 'w') as file:
             file.write(config_files[0])
     except:
-        continue
+        pass
     CACHED_CONFIG_FILE_PATH = config_files[0]
 else:
     print('configuration*.ini file not found, defaulting to legacy configuration')
