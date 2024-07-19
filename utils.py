@@ -309,6 +309,8 @@ class SharedConfig:
         self.save_raw_images = self.manager.Value('b', False)      # 'b' for boolean
         self.save_overlay_images = self.manager.Value('b', False)  # 'b' for boolean
         self.save_spot_images = self.manager.Value('b', False)     # 'b' for boolean
+        self.nx = self.manager.Value('i', 0)  # 'i' for integer
+        self.ny = self.manager.Value('i', 0)  # 'i' for integer
 
     def set_path(self, new_path):
         self.path.value = new_path

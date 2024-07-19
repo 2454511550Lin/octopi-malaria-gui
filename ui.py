@@ -731,9 +731,9 @@ class ImageAnalysisUI(QMainWindow):
         self.shared_config.save_raw_images.value = self.raw_images_check.isChecked()
         self.shared_config.save_overlay_images.value = self.overlay_images_check.isChecked()
         self.shared_config.save_spot_images.value = self.positives_images_check.isChecked()
-
-        print("Box is checked: ",self.raw_images_check.isChecked())
-        print("Flag is checked: ",self.shared_config.save_raw_images.value)
+        self.shared_config.nx.value = self.x_input.value()
+        self.shared_config.ny.value = self.y_input.value()
+        
 
         self.patient_id_label.setText(f"Patient ID: {self.patient_id}")
         self.start_event.set()  # Signal the main process to start
