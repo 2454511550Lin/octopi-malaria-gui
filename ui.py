@@ -10,9 +10,9 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QSplitter, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QMessageBox, QStyleFactory, QFileDialog,
-    QComboBox, QCheckBox, QGroupBox, QGridLayout,QSpinBox
+    QComboBox, QCheckBox, QGroupBox, QGridLayout,QSpinBox, QFrame
 )
-from PyQt5.QtGui import QImage, QColor
+from PyQt5.QtGui import QImage, QColor, QFont
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 
 import pyqtgraph as pg
@@ -167,124 +167,78 @@ class ImageAnalysisUI(QMainWindow):
 
          # Start Tab
         start_tab = QWidget()
-        start_layout = QGridLayout(start_tab)
 
+        # Card frame
+        card = QFrame(self)
+        card.setObjectName("card")
+        card.setFixedSize(400, 500)
+        card.setStyleSheet("""
+            #card {
+                background-color: white;
+                border: 1px solid #e0e0e0;
+                border-radius: 25px;
+            }
+        """)
+        card_layout = QVBoxLayout(card)
 
-        first_column = QVBoxLayout()
-        
         # Welcome label
         welcome_label = QLabel("Welcome to Octopi")
         welcome_label.setAlignment(Qt.AlignCenter)
-        welcome_label.setStyleSheet("font-size: 36px; margin-bottom: 20px;")
-        first_column.addWidget(welcome_label)
-
-        # Start button
-        self.start_button = QPushButton("Start Scanning")
-        self.start_button.clicked.connect(self.start_analysis)
-        # align the button to the center
-
-        self.start_button.setStyleSheet("""
-            QPushButton { 
-                background-color: #48abe8; 
-                font-size: 24px;
-                padding: 24px 48px;
-            }
-            QPushButton:hover { background-color: #357eab; }
+        welcome_label.setStyleSheet("""
+            font-size: 30px;
+            font-weight: bold;
+            color: #2C3E50;
+            padding: 10px;
         """)
-       
-        first_column.addWidget(self.start_button, alignment=Qt.AlignCenter)
 
-        start_layout.addLayout(first_column, 0, 0)
-
-        # settings column
-        setting_column = QVBoxLayout()
+        card_layout.addWidget(welcome_label)
 
         # Patient ID input
-        patient_group = QGroupBox("Patient Information")
-        patient_layout = QHBoxLayout(patient_group)
-        patient_layout.addWidget(QLabel("Patient ID:"))
+        patient_id_layout = QVBoxLayout()
+        patient_id_label = QLabel("Patient ID:")
+        patient_id_label.setStyleSheet("""
+            margin-bottom: 0px; 
+        """)
         self.patient_id_input = QLineEdit()
-        patient_layout.addWidget(self.patient_id_input)
-        setting_column.addWidget(patient_group)
+        self.patient_id_input.setPlaceholderText("Enter Patient ID")
+        self.patient_id_input.setStyleSheet("""
+            QLineEdit {
+                border: 2px solid #ccc;
+                border-radius: 4px;
+                margin-bottom: 65px; 
+                margin-top: 1px;
+            }
+        """)
+        patient_id_layout.addWidget(patient_id_label)
+        patient_id_layout.addWidget(self.patient_id_input)
+        card_layout.addLayout(patient_id_layout)
 
-        # Directory selection
-        directory_group = QGroupBox("Save Directory")
-        directory_layout = QHBoxLayout(directory_group)
-        self.directory_input = QLineEdit()
-        self.directory_input.setPlaceholderText("Enter or select directory")
-        self.browse_button = QPushButton("Browse")
-        self.browse_button.clicked.connect(self.browse_directory)
-        directory_layout.addWidget(self.directory_input)
-        directory_layout.addWidget(self.browse_button)
-        setting_column.addWidget(directory_group)
-
-        # Image options
-        options_group = QGroupBox("Image Saving Options")
-        options_layout = QVBoxLayout(options_group)
-        self.raw_images_check = QCheckBox("Raw Images")
-        self.overlay_images_check = QCheckBox("Overlay Images")
-        self.positives_images_check = QCheckBox("Spots Images")
-        self.raw_images_check.setChecked(True)
-        self.overlay_images_check.setChecked(True)
-        self.positives_images_check.setChecked(True)
-        options_layout.addWidget(self.raw_images_check)
-        options_layout.addWidget(self.overlay_images_check)
-        options_layout.addWidget(self.positives_images_check)
-        setting_column.addWidget(options_group)
-
-        start_layout.addLayout(setting_column, 0, 1)
-        
-        # microscope column
-        microscope_column = QVBoxLayout()
-
-        # Channel selection
-        channel_group = QGroupBox("Channel Selection")
-        channel_layout = QVBoxLayout(channel_group)
-        self.channel_combo = QComboBox()
-        self.load_channels()
-        channel_layout.addWidget(self.channel_combo)
-        microscope_column.addWidget(channel_group)
-
-        # Microscope controls
-        microscope_group = QGroupBox("Microscope Controls")
-        microscope_layout = QVBoxLayout(microscope_group)
-        self.live_button = QPushButton("LIVE")
-        self.live_button.clicked.connect(self.start_live_view)
+        # To Loading Position button
         self.loading_position_button = QPushButton("To Loading Position")
+        card_layout.addWidget(self.loading_position_button)
         self.loading_position_button.clicked.connect(self.move_to_loading_position)
-        microscope_layout.addWidget(self.live_button)
-        microscope_layout.addWidget(self.loading_position_button)
-        microscope_column.addWidget(microscope_group)
 
-        # Position selection
-        position_group = QGroupBox("Position Selection")
-        position_layout = QGridLayout(position_group)
-        position_layout.addWidget(QLabel("X:"), 0, 0)
-        self.x_input = QSpinBox()
-        self.x_input.setRange(1, 100)  # Adjust the range as needed
-        self.x_input.setValue(1)  # Set default value to 1
-        self.x_input.setStyleSheet("QSpinBox { width: 1px; height: 25px; }")
-        position_layout.addWidget(self.x_input, 0, 1)
-        position_layout.addWidget(QLabel("Y:"), 1, 0)
-        self.y_input = QSpinBox()
-        self.y_input.setRange(1, 100)  # Adjust the range as needed
-        self.y_input.setValue(1)  # Set default value to 1
-        self.y_input.setStyleSheet("QSpinBox { width: 1px; height: 25px; }")
-        position_layout.addWidget(self.y_input, 1, 1)
-        # shrink the first column to a certain ratio
-        position_layout.setColumnStretch(0, 1)
-        position_layout.setColumnStretch(1, 5)
+        # Start Scanning button
+        self.start_button = QPushButton("Start Scanning")
+        self.start_button.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                padding: 10px;
+                border: none;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        card_layout.addWidget(self.start_button)
+        self.start_button.clicked.connect(self.start_analysis)
 
-        microscope_column.addWidget(position_group)
-
-        start_layout.addLayout(microscope_column, 0, 2)
+        start_layout = QHBoxLayout(start_tab)
+        start_layout.addWidget(card, alignment=Qt.AlignCenter)
 
         self.tab_widget.addTab(start_tab, "Start")
-
-        # set the column stretch
-        start_layout.setColumnStretch(0, 2)
-        start_layout.setColumnStretch(1, 1)
-        start_layout.setColumnStretch(2, 1)
 
         # Modify the FOV Tab
         fov_tab = QWidget()
@@ -338,7 +292,6 @@ class ImageAnalysisUI(QMainWindow):
         # add on top of the fov table
         middle_layout.addWidget(self.stats_label_small)
 
-
         self.fov_table = QTableWidget()
         self.fov_table.setColumnCount(3)
         self.fov_table.setHorizontalHeaderLabels(["FOV id", "RBCs", "Positives"])
@@ -383,6 +336,89 @@ class ImageAnalysisUI(QMainWindow):
         self.cropped_layout.addWidget(self.virtual_image_list)
 
         self.tab_widget.addTab(self.cropped_tab, "Malaria Detection Report")
+
+        # A tab for live view
+        live_view_tab = QWidget()
+        live_view_layout = QVBoxLayout(live_view_tab)
+
+
+        # Channel selection
+        channel_group = QGroupBox("Channel Selection")
+        channel_layout = QHBoxLayout(channel_group)
+        self.channel_combo = QComboBox()
+        self.load_channels()
+        channel_layout.addWidget(self.channel_combo, alignment=Qt.AlignTop | Qt.AlignLeft)
+        live_view_layout.addWidget(channel_group)
+
+        # Microscope controls
+       
+        self.live_button = QPushButton("LIVE")
+        self.live_button.clicked.connect(self.start_live_view)
+
+        live_view_layout.addWidget(self.live_button, alignment=Qt.AlignTop | Qt.AlignLeft)
+
+        live_view_layout.addStretch(1)
+
+
+        self.tab_widget.addTab(live_view_tab, "Live View")
+        
+
+        # a tab for settings
+        settings_tab = QWidget()
+        settings_layout = QVBoxLayout(settings_tab)
+
+        # Directory selection
+        directory_group = QGroupBox("Save Directory")
+        directory_layout = QHBoxLayout(directory_group)
+        self.directory_input = QLineEdit()
+        # set a fixed width for the input field
+        self.directory_input.setFixedWidth(500)
+        # set a default input
+        self.directory_input.setText(os.path.join(os.getcwd(), "saved_data"))
+        self.browse_button = QPushButton("Browse")
+        self.browse_button.clicked.connect(self.browse_directory)
+        directory_layout.addWidget(self.directory_input)
+        directory_layout.addWidget(self.browse_button)
+        settings_layout.addWidget(directory_group, alignment=Qt.AlignTop | Qt.AlignLeft)
+
+        # Image options
+        options_group = QGroupBox("Image Saving Options")
+        options_layout = QVBoxLayout(options_group)
+        self.raw_images_check = QCheckBox("Raw Images")
+        self.overlay_images_check = QCheckBox("Overlay Images")
+        self.positives_images_check = QCheckBox("Spots Images")
+        self.raw_images_check.setChecked(True)
+        self.overlay_images_check.setChecked(True)
+        self.positives_images_check.setChecked(True)
+        options_layout.addWidget(self.raw_images_check)
+        options_layout.addWidget(self.overlay_images_check)
+        options_layout.addWidget(self.positives_images_check)
+        settings_layout.addWidget(options_group, alignment=Qt.AlignTop | Qt.AlignLeft)
+
+        # Position selection
+        position_group = QGroupBox("Field of View Selection")
+        position_layout = QGridLayout(position_group)
+        position_layout.addWidget(QLabel("X:"), 0, 0)
+        self.x_input = QSpinBox()
+        self.x_input.setRange(1, 100)  # Adjust the range as needed
+        self.x_input.setValue(1)  # Set default value to 1
+        self.x_input.setStyleSheet("QSpinBox { width: 1px; height: 25px; }")
+        position_layout.addWidget(self.x_input, 0, 1)
+        position_layout.addWidget(QLabel("Y:"), 1, 0)
+        self.y_input = QSpinBox()
+        self.y_input.setRange(1, 100)  # Adjust the range as needed
+        self.y_input.setValue(1)  # Set default value to 1
+        self.y_input.setStyleSheet("QSpinBox { width: 1px; height: 25px; }")
+        position_layout.addWidget(self.y_input, 1, 1)
+        # shrink the first column to a certain ratio
+        position_layout.setColumnStretch(0, 1)
+        position_layout.setColumnStretch(1, 5)
+        settings_layout.addWidget(position_group, alignment=Qt.AlignTop | Qt.AlignLeft)
+
+        settings_layout.addStretch(1)
+
+        settings_tab.setLayout(settings_layout)
+        self.tab_widget.addTab(settings_tab, "Settings")
 
     def setup_fov_image_view(self):
         self.fov_image_view.ui.roiBtn.hide()
