@@ -123,8 +123,8 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
         start_event.wait()        
         # construct the iterator
         try:
-            for x in range(1):
-                for y in range(1):
+            for x in range(shared_config.nx.value):
+                for y in range(shared_config.ny.value):
 
                     fov_id = f"{x}_{y}_0"
                     log_time(fov_id, "Image Acquisition", "start")
@@ -170,7 +170,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
         while start_event.is_set() and not shutdown_event.is_set():
             time.sleep(1)
 
-
+    microscope.close()
 
 from utils import generate_dpc
 

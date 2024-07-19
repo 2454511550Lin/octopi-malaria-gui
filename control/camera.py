@@ -312,7 +312,7 @@ class Camera(object):
             self.camera.TriggerSoftware.send_command()
         else:
         	print('trigger not sent - camera is not streaming')
-
+            
     def read_frame(self):
         raw_image = self.camera.data_stream[self.device_index].get_image()
         if self.is_color:
