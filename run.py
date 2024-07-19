@@ -267,7 +267,7 @@ def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_
         except Empty:
             continue
 
-from utils import remove_background, resize_image_cp, detect_spots, prune_blobs, settings
+from utils import remove_background, resize_image_cp, detect_spots, prune_blobs, settings, seg_spot_filter_one_fov
 
 def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
     
@@ -345,11 +345,12 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
      
                 segmentation_map = shared_memory_segmentation[fov_id]['segmentation_map']
                 spot_list = shared_memory_fluorescent[fov_id]['spot_indices']
+
+                #filtered_spots = seg_spot_filter_one_fov(segmentation_map, spot_list)
                 
                 dpc_image = shared_memory_dpc[fov_id]['dpc_image']
                 fluorescence_image = shared_memory_acquisition[fov_id]['fluorescent'].astype(float)/255
                 
-                # print(f"Classification Process: getting spot images for FOV {fov_id} with {len(spot_list)} spots")
                 cropped_images = get_spot_images_from_fov(fluorescence_image,dpc_image,spot_list,r=15)
                 cropped_images = cropped_images.transpose(0, 3, 1, 2)
 
@@ -489,7 +490,7 @@ if __name__ == "__main__":
 
     # Create and start processes
     processes = [
-        mp.Process(target=image_acquisition, args=(dpc_queue, fluorescent_queue, shutdown_event,start_event), name="Image Acquisition"),
+        mp.Process(target=image_acquisition_simulation, args=(dpc_queue, fluorescent_queue, shutdown_event,start_event), name="Image Acquisition"),
         mp.Process(target=dpc_process, args=(dpc_queue, segmentation_queue, shutdown_event,start_event), name="DPC Process"),
         mp.Process(target=fluorescent_spot_detection, args=(fluorescent_queue, fluorescent_detection_queue, shutdown_event,start_event), name="Fluorescent Spot Detection"),
         mp.Process(target=saving_process, args=(save_queue, cleanup_queue, shutdown_event,start_event), name="Saving Process"),

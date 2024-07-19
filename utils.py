@@ -181,6 +181,33 @@ def process_spots(I_background_removed,I_raw,spot_list,i,j,k,settings,I_mask=Non
 	spot_data_pd = extract_spot_data(I_background_removed,I_raw,spot_list,i,j,k,settings)
 	return spot_list, spot_data_pd
 
+
+def seg_spot_filter_one_fov(mask, spots, crop_offset_x=100, crop_offset_y=100, overlap_threshold=6/9):
+    
+    # Erode the mask
+    kernel = np.ones((3, 3), np.uint8)
+    eroded_mask = cv2.erode(mask, kernel)
+    
+    # List to store overlapping spots
+    overlapping_spots = []
+    
+    # Process each spot
+    for spot in spots:
+        x, y, radius = spot[:3]  # We don't use the radius in this function, but we keep it for the output
+        x, y = int(x), int(y)
+        
+        # Calculate overlap
+        roi = eroded_mask[crop_offset_y+y-1:crop_offset_y+y+2, crop_offset_x+x-1:crop_offset_x+x+2]
+        if roi.size == 9:  # Ensure we have a full 3x3 region
+            overlap = np.sum(roi > 0) / 9
+            
+            # If overlap is above threshold, add to list of overlapping spots
+            if overlap >= overlap_threshold:
+                overlapping_spots.append(spot)
+    
+    # Convert list of overlapping spots to numpy array
+    return np.array(overlapping_spots)
+
 def generate_dpc(I1, I2, use_gpu=False):
     if use_gpu:
         # GPU implementation is not provided, so I'll leave a placeholder
