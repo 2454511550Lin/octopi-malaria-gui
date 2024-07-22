@@ -260,7 +260,7 @@ class ImageAnalysisUI(QMainWindow):
         left_layout.addLayout(nav_layout)
 
         self.fov_image_view = pg.ImageView()
-        self.setup_fov_image_view()
+        self.setup_fov_image_view(self.fov_image_view)
         left_layout.addWidget(self.fov_image_view)
 
         splitter.addWidget(fov_widget)
@@ -338,8 +338,13 @@ class ImageAnalysisUI(QMainWindow):
         self.tab_widget.addTab(self.cropped_tab, "Malaria Detection Report")
 
         # A tab for live view
+        # A tab for live view
         live_view_tab = QWidget()
-        live_view_layout = QVBoxLayout(live_view_tab)
+        live_view_layout = QHBoxLayout(live_view_tab)  # Changed to QHBoxLayout
+
+        # Left side container for channel selection and LIVE button
+        left_container = QWidget()
+        left_layout = QVBoxLayout(left_container)
 
         # Channel selection
         channel_group = QGroupBox("Channel Selection")
@@ -349,26 +354,36 @@ class ImageAnalysisUI(QMainWindow):
         # create a signal when the channel is changed
         self.channel_combo.currentIndexChanged.connect(self.switch_channel)
         channel_layout.addWidget(self.channel_combo, alignment=Qt.AlignTop | Qt.AlignLeft)
-        live_view_layout.addWidget(channel_group)
+        left_layout.addWidget(channel_group)
 
         # LIVE button
         self.live_button = QPushButton("LIVE")
         self.live_button.clicked.connect(self.toggle_live_view)
-        live_view_layout.addWidget(self.live_button, alignment=Qt.AlignTop | Qt.AlignLeft)
-        self.tab_widget.addTab(live_view_tab, "Live View")
-        
+        left_layout.addWidget(self.live_button, alignment=Qt.AlignTop | Qt.AlignLeft)
+
+
+        # Add left container to main layout
+        live_view_layout.addWidget(left_container)
+
         # Live view graph
         self.live_view_graph = pg.GraphicsLayoutWidget()
         self.live_view_plot = self.live_view_graph.addPlot()
         self.live_view_image = pg.ImageItem()
         self.live_view_plot.setAspectLocked(True, ratio=1)
+        # hide axis
+        self.live_view_plot.hideAxis('left')
+        self.live_view_plot.hideAxis('bottom')
+        # get rid of the margin
+        self.live_view_plot.layout.setContentsMargins(0, 0, 0, 0)
+
         self.live_view_plot.addItem(self.live_view_image)
         live_view_layout.addWidget(self.live_view_graph)
 
-        # Timer for updating live view
-        self.live_view_timer = QTimer(self, interval= int(1.0 / self.shared_config.frame_rate.value * 1000)) 
-        self.live_view_timer.timeout.connect(self.update_live_view)
+        self.tab_widget.addTab(live_view_tab, "Live View")
 
+        # Timer for updating live view
+        self.live_view_timer = QTimer(self, interval=int(1.0 / self.shared_config.frame_rate.value * 1000))
+        self.live_view_timer.timeout.connect(self.update_live_view)
         # a tab for settings
         settings_tab = QWidget()
         settings_layout = QVBoxLayout(settings_tab)
@@ -431,12 +446,12 @@ class ImageAnalysisUI(QMainWindow):
         index = self.channel_combo.currentIndex()
         self.shared_config.set_channel_selected(index)
 
-    def setup_fov_image_view(self):
-        self.fov_image_view.ui.roiBtn.hide()
-        self.fov_image_view.ui.menuBtn.hide()
-        self.fov_image_view.ui.histogram.hide()
-        self.fov_image_view.view.setMouseEnabled(x=True, y=True)
-        self.fov_image_view.view.setBackgroundColor((255, 255, 255))
+    def setup_fov_image_view(self,image_view):
+        image_view.ui.roiBtn.hide()
+        image_view.ui.menuBtn.hide()
+        image_view.ui.histogram.hide()
+        image_view.view.setMouseEnabled(x=True, y=True)
+        image_view.view.setBackgroundColor((255, 255, 255))
 
     def toggle_silent_mode(self):
         self.silent_mode = not self.silent_mode
@@ -493,7 +508,6 @@ class ImageAnalysisUI(QMainWindow):
         # Generate a random image
         image = self.shared_config.get_live_view_image()
         self.live_view_image.setImage(image)
-        self.live_view_plot.setTitle(f"Live View - FPS: {self.shared_config.frame_rate.value:.2f}")
 
     def move_to_loading_position(self):
         if self.loading_position_button.text() == "To Loading Position":

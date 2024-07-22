@@ -39,6 +39,11 @@ timeout = 0.1
 shared_config = SharedConfig()
 shared_config.set_path('data')
 
+
+INIT_FOCUS_RANGE_START_MM = 3
+INIT_FOCUS_RANGE_END_MM = 7
+SCAN_FOCUS_SEARCH_RANGE_MM = 0.1
+
 def log_time(fov_id: str, process_name: str, event: str):
     with timing_lock:
         #print(f"Logging time for FOV {fov_id} in {process_name} at {event}")
@@ -115,7 +120,8 @@ def image_acquisition_simulation(dpc_queue: mp.Queue, fluorescent_queue: mp.Queu
 from microscope import Microscope
 def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
 
-    microscope = Microscope(is_simulation=True)
+    simulation = False
+    microscope = Microscope(is_simulation=simulation)
 
     microscope.camera.start_streaming()
     microscope.camera.set_software_triggered_acquisition()
@@ -151,16 +157,19 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                     microscope.set_channel(shared_config.live_channels_list[live_channel_index])
 
                 image = microscope.acquire_image()
-                # generate a random 3k x 3k image
-                #image = np.random.rand(3000, 3000).astype(np.float32) 
-                shared_config.set_live_view_image(image)
+
+                #print("Live view image shape: ", image.shape)
+                
+                shared_config.set_live_view_image(crop_image(image))
             
             time.sleep(1/shared_config.frame_rate.value)
             
             continue
 
-
         try:
+            # do auto focus
+            microscope.run_autofocus(step_size_mm = [0.1, 0.01, 0.0015], start_z_mm = INIT_FOCUS_RANGE_START_MM, end_z_mm = INIT_FOCUS_RANGE_END_MM)
+
             for x in range(shared_config.nx.value):
                 for y in range(shared_config.ny.value):
 
@@ -176,14 +185,12 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                     microscope.set_channel(channels[2])
                     fluorescent = microscope.acquire_image()
                     # ducplicate fluorescent from 3k x 3k to 3k x 3k x 3
-                    fluorescent = np.stack([fluorescent,fluorescent,fluorescent],axis=2)
-
-
-                    # left and right should be 2800x2800, if three channels, convert to grayscale
-                    #if left_half.shape[2] == 3:
-                    #    left_half = left_half[:,:,0]
-                    #if right_half.shape[2] == 3:
-                    #    right_half = right_half[:,:,0]
+                    if not simulation:
+                        # go from 3k x 3k x 3 to 3k x 3k, take the middle channel
+                        left_half = left_half[:,:,1]
+                        right_half = right_half[:,:,1]
+                    else:
+                        fluorescent = np.stack([fluorescent,fluorescent,fluorescent],axis=2)
 
                     print (left_half.shape, right_half.shape, fluorescent.shape)
 
@@ -300,8 +307,9 @@ def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shu
             spot_list = detect_spots(resize_image_cp(I_fluorescence_bg_removed,
                                                      downsize_factor=settings['spot_detection_downsize_factor']),
                                                      thresh=settings['spot_detection_threshold'])
-
-            spot_list = prune_blobs(spot_list)
+            print(f"FOV {fov_id} detected {len(spot_list)} spots")
+            if len(spot_list) > 0:
+                spot_list = prune_blobs(spot_list)
 
             # scale coordinates for full-res image
             spot_list = spot_list*settings['spot_detection_downsize_factor']
@@ -362,20 +370,24 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                 segmentation_map = shared_memory_segmentation[fov_id]['segmentation_map']
                 spot_list = shared_memory_fluorescent[fov_id]['spot_indices']
 
-                filtered_spots = seg_spot_filter_one_fov(segmentation_map, spot_list)
+                if len(spot_list) > 0:
+                    filtered_spots = seg_spot_filter_one_fov(segmentation_map, spot_list)
                 
-                dpc_image = shared_memory_dpc[fov_id]['dpc_image']
-                fluorescence_image = shared_memory_acquisition[fov_id]['fluorescent'].astype(float)/255
+                    dpc_image = shared_memory_dpc[fov_id]['dpc_image']
+                    fluorescence_image = shared_memory_acquisition[fov_id]['fluorescent'].astype(float)/255
                 
-                cropped_images = get_spot_images_from_fov(fluorescence_image,dpc_image,filtered_spots,r=15)
-                cropped_images = cropped_images.transpose(0, 3, 1, 2)
+                    cropped_images = get_spot_images_from_fov(fluorescence_image,dpc_image,filtered_spots,r=15)
+                    cropped_images = cropped_images.transpose(0, 3, 1, 2)
 
-                scores1 = run_model(model1,DEVICE,cropped_images,4096)[:,1]
-                scores2 = run_model(model2,DEVICE,cropped_images,4096)[:,1]
+                    scores1 = run_model(model1,DEVICE,cropped_images,4096)[:,1]
+                    scores2 = run_model(model2,DEVICE,cropped_images,4096)[:,1]
 
 
-                # use whichever smaller as the final score
-                scores = np.minimum(scores1,scores2)
+                    # use whichever smaller as the final score
+                    scores = np.minimum(scores1,scores2)
+                else:
+                    scores = np.array([])
+                    cropped_images = np.array([])
 
 
                 with classification_lock:
