@@ -341,27 +341,33 @@ class ImageAnalysisUI(QMainWindow):
         live_view_tab = QWidget()
         live_view_layout = QVBoxLayout(live_view_tab)
 
-
         # Channel selection
         channel_group = QGroupBox("Channel Selection")
         channel_layout = QHBoxLayout(channel_group)
         self.channel_combo = QComboBox()
         self.load_channels()
+        # create a signal when the channel is changed
+        self.channel_combo.currentIndexChanged.connect(self.switch_channel)
         channel_layout.addWidget(self.channel_combo, alignment=Qt.AlignTop | Qt.AlignLeft)
         live_view_layout.addWidget(channel_group)
 
-        # Microscope controls
-       
+        # LIVE button
         self.live_button = QPushButton("LIVE")
-        self.live_button.clicked.connect(self.start_live_view)
-
+        self.live_button.clicked.connect(self.toggle_live_view)
         live_view_layout.addWidget(self.live_button, alignment=Qt.AlignTop | Qt.AlignLeft)
-
-        live_view_layout.addStretch(1)
-
-
         self.tab_widget.addTab(live_view_tab, "Live View")
         
+        # Live view graph
+        self.live_view_graph = pg.GraphicsLayoutWidget()
+        self.live_view_plot = self.live_view_graph.addPlot()
+        self.live_view_image = pg.ImageItem()
+        self.live_view_plot.setAspectLocked(True, ratio=1)
+        self.live_view_plot.addItem(self.live_view_image)
+        live_view_layout.addWidget(self.live_view_graph)
+
+        # Timer for updating live view
+        self.live_view_timer = QTimer(self, interval= int(1.0 / self.shared_config.frame_rate.value * 1000)) 
+        self.live_view_timer.timeout.connect(self.update_live_view)
 
         # a tab for settings
         settings_tab = QWidget()
@@ -421,6 +427,10 @@ class ImageAnalysisUI(QMainWindow):
         settings_tab.setLayout(settings_layout)
         self.tab_widget.addTab(settings_tab, "Settings")
 
+    def switch_channel(self):
+        index = self.channel_combo.currentIndex()
+        self.shared_config.set_channel_selected(index)
+
     def setup_fov_image_view(self):
         self.fov_image_view.ui.roiBtn.hide()
         self.fov_image_view.ui.menuBtn.hide()
@@ -442,34 +452,48 @@ class ImageAnalysisUI(QMainWindow):
             tree = ET.parse('channel_configurations.xml')
             root = tree.getroot()
             channels = [mode.get('Name') for mode in root.findall('mode')]
+            self.shared_config.set_channels_list(channels)
             self.channel_combo.addItems(channels)
         except ET.ParseError as e:
             print(f"Error parsing XML: {e}")
         except FileNotFoundError:
             print("channel_configurations.xml file not found")
 
-    def start_live_view(self):
-        
-        # check what is the text of the button
-        if self.live_button.text() == "LIVE (Running)":
-            self.live_button.setText("LIVE")
-            self.live_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #2C3E50;
-                }
-                QPushButton:hover { background-color: #357eab; }
-            """)
-
+    def toggle_live_view(self):
+        if self.shared_config.is_live_view_active.value:
+            self.stop_live_view()
         else:
-            self.live_button.setText("LIVE (Running)")
-        # change the color 
-            self.live_button.setStyleSheet("""
-                QPushButton { 
-                    background-color: #48abe8; 
-                }
-                QPushButton:hover { background-color: #357eab; }
-            """)
+            self.start_live_view()
 
+    def start_live_view(self):
+        self.live_button.setText("STOP LIVE")
+        self.live_button.setStyleSheet("""
+            QPushButton { 
+                background-color: #48abe8; 
+            }
+            QPushButton:hover { background-color: #357eab; }
+        """)
+        self.live_view_timer.start()
+        self.shared_config.is_live_view_active.value = True
+
+    def stop_live_view(self):
+        self.live_button.setText("LIVE")
+        self.live_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2C3E50;
+            }
+            QPushButton:hover { background-color: #357eab; }
+        """)
+        self.live_view_timer.stop()
+        # clear up the image
+        self.live_view_image.clear()
+        self.shared_config.is_live_view_active.value = False
+
+    def update_live_view(self):
+        # Generate a random image
+        image = self.shared_config.get_live_view_image()
+        self.live_view_image.setImage(image)
+        self.live_view_plot.setTitle(f"Live View - FPS: {self.shared_config.frame_rate.value:.2f}")
 
     def move_to_loading_position(self):
         if self.loading_position_button.text() == "To Loading Position":
@@ -514,6 +538,7 @@ class ImageAnalysisUI(QMainWindow):
         self.patient_id_label.setText("")
         self.positive_images_widget.image_list.clear()
         self.stats_label.setText("FoVs: 0 | Total RBC Count: 0 | Total Malaria Positives: 0")
+        self.stats_label_small.setText("FoVs: 0 | Total RBCs: 0 | Total Positives: 0")
         
         # Reset other variables
         self.current_fov_index = -1
@@ -530,6 +555,10 @@ class ImageAnalysisUI(QMainWindow):
 
         # Signal the main process to stop
         self.start_event.clear()
+
+        self.first_fov_time = None
+        self.latest_fov_time = None
+
 
     def update_avg_processing_time(self):
         if self.first_fov_time is not None and self.latest_fov_time:
@@ -655,15 +684,19 @@ class ImageAnalysisUI(QMainWindow):
         if fov_id in self.fov_image_cache:
             self.current_fov_index = list(self.fov_image_cache.keys()).index(fov_id)
         else:
-            print(f"FOV {fov_id} not in cache. It may need to be loaded.")
+            #print(f"FOV {fov_id} not in cache. It may need to be loaded.")
             # load from the local disk
-            filename = f"{self.shared_config.get_path()}/{fov_id}_overlay.npy"
-            img_array = np.load(filename)
-            self.fov_image_cache[fov_id] = numpy2png(img_array, resize_factor=0.5)
-            # delete the oldest image
-            if len(self.fov_image_cache) > self.max_cache_size:
-                oldest_fov = next(iter(self.fov_image_cache))
-                del self.fov_image_cache[oldest_fov]
+            try:
+                filename = f"{self.shared_config.get_path()}/{fov_id}_overlay.npy"
+                img_array = np.load(filename)
+                self.fov_image_cache[fov_id] = numpy2png(img_array, resize_factor=0.5)
+                # delete the oldest image
+                if len(self.fov_image_cache) > self.max_cache_size:
+                    oldest_fov = next(iter(self.fov_image_cache))
+                    del self.fov_image_cache[oldest_fov]
+            except FileNotFoundError:
+                print(f"FOV {fov_id} not found on disk")
+                return
 
         self.selected_fov_id = fov_id
         self.display_current_fov()

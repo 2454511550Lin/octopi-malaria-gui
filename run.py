@@ -107,7 +107,7 @@ def image_acquisition_simulation(dpc_queue: mp.Queue, fluorescent_queue: mp.Queu
         time.sleep(1) 
 
         counter += 1
-        if counter == 10:
+        if counter == 500:
             counter = 0
             while start_event.is_set() and not shutdown_event.is_set():
                 time.sleep(1)
@@ -122,29 +122,43 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
     microscope.camera.disable_callback()
 
     microscope.home_xyz()
+    
+    live_channel_index = -1
 
     while not shutdown_event.is_set():
 
         # check if to loading or to scanning position
-        
         if not start_event.is_set():
-
             with shared_config.position_lock:
-                
                 if shared_config.to_scanning.value and not shared_config.to_loading.value:
                     print("Moving to scanning position")
                     microscope.to_scanning_position()
                     shared_config.reset_to_scanning()
                     continue
-                
                 if shared_config.to_loading.value and not shared_config.to_scanning.value:
                     print("Moving to loading position")
                     microscope.to_loading_position()
                     shared_config.reset_to_loading()
                     continue
 
-            time.sleep(1)
+            #print("Check the live view active vlaue: ", shared_config.is_live_view_active.value)
+            
+            if shared_config.is_live_view_active.value:
+
+                if live_channel_index != shared_config.live_channel_selected.value:
+                    live_channel_index = shared_config.live_channel_selected.value
+                    # get the value from manager.list
+                    microscope.set_channel(shared_config.live_channels_list[live_channel_index])
+
+                image = microscope.acquire_image()
+                # generate a random 3k x 3k image
+                #image = np.random.rand(3000, 3000).astype(np.float32) 
+                shared_config.set_live_view_image(image)
+            
+            time.sleep(1/shared_config.frame_rate.value)
+            
             continue
+
 
         try:
             for x in range(shared_config.nx.value):
@@ -492,7 +506,7 @@ if __name__ == "__main__":
 
     # Create and start processes
     processes = [
-        mp.Process(target=image_acquisition_simulation, args=(dpc_queue, fluorescent_queue, shutdown_event,start_event), name="Image Acquisition"),
+        mp.Process(target=image_acquisition, args=(dpc_queue, fluorescent_queue, shutdown_event,start_event), name="Image Acquisition"),
         mp.Process(target=dpc_process, args=(dpc_queue, segmentation_queue, shutdown_event,start_event), name="DPC Process"),
         mp.Process(target=fluorescent_spot_detection, args=(fluorescent_queue, fluorescent_detection_queue, shutdown_event,start_event), name="Fluorescent Spot Detection"),
         mp.Process(target=saving_process, args=(save_queue, cleanup_queue, shutdown_event,start_event), name="Saving Process"),

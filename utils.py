@@ -339,7 +339,19 @@ class SharedConfig:
         self.nx = self.manager.Value('i', 0)  # 'i' for integer
         self.ny = self.manager.Value('i', 0)  # 'i' for integer
 
+        # for live viewing
+        self.is_live_view_active = self.manager.Value('b', False)
+        self.live_channel_selected = self.manager.Value('i', 0)
+        self.live_channels_list = self.manager.list(["BF LED matrix left half","BF LED matrix right half","Fluorescence 405 nm Ex"])
+        
+        # Fixed 3000x3000 image size
+        self.IMAGE_SHAPE = (3000, 3000)
+        self.IMAGE_SIZE = self.IMAGE_SHAPE[0] * self.IMAGE_SHAPE[1]
+        self.live_view_image_array = mp.RawArray('f', self.IMAGE_SIZE)
+        self.live_view_image_lock = mp.Lock()
+        self.frame_rate = self.manager.Value('f', 30.0)
 
+        # for position loading and scanning
         self.position_lock = self.manager.Lock()
         self.to_loading = self.manager.Value('b', False)  # 'b' for boolean
         self.to_scanning = self.manager.Value('b', False)  # 'b' for boolean
@@ -361,3 +373,24 @@ class SharedConfig:
 
     def reset_to_scanning(self):    
         self.to_scanning.value = False
+
+    def set_live_view_image(self, np_array):
+        if np_array.shape != self.IMAGE_SHAPE:
+            raise ValueError(f"Input array must have shape {self.IMAGE_SHAPE}")
+        
+        with self.live_view_image_lock:
+            # Create a numpy array backed by shared memory
+            shared_array = np.frombuffer(self.live_view_image_array, dtype=np.float32).reshape(self.IMAGE_SHAPE)
+            # Copy data efficiently
+            np.copyto(shared_array, np_array)
+
+    def get_live_view_image(self):
+        with self.live_view_image_lock:
+            # Create a copy of the shared array to avoid issues with threading
+            return np.frombuffer(self.live_view_image_array, dtype=np.float32).reshape(self.IMAGE_SHAPE).copy()
+
+    def set_channels_list(self, channels_list):
+        self.live_channels_list[:] = channels_list
+
+    def set_channel_selected(self, channel_idx):
+        self.live_channel_selected.value = channel_idx
