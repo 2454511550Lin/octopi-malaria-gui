@@ -2,6 +2,7 @@ import cv2
 from numpy import std, square, mean
 import numpy as np
 from scipy.ndimage import label
+from scipy.interpolate import griddata
 
 def crop_image(image,crop_width,crop_height):
     image_height = image.shape[0]
@@ -138,3 +139,23 @@ def interpolate_plane(triple1, triple2, triple3, point):
 
     return z
 
+def generate_scan_grid(dx_mm, dy_mm, Nx, Ny, offset_x_mm = 0, offset_y_mm = 0, S_scan=True):
+    x = [offset_x_mm + i * dx_mm for i in range(Nx)]
+    y = [offset_y_mm + i * dy_mm for i in range(Ny)]
+
+    grid = []
+    for i, yi in enumerate(y):
+        row = [(xi, yi) for xi in x]
+        if S_scan and i % 2 == 1:
+            row.reverse()
+        grid.extend(row)
+
+    return grid
+
+def interpolate_focus(scan_grid, focus_map, method='linear'):
+    points = [(x, y) for x, y, _ in focus_map]
+    values = [z for _, _, z in focus_map]
+
+    z_interpolated = griddata(points, values, scan_grid, method=method)
+
+    return z_interpolated
