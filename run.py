@@ -36,8 +36,8 @@ final_lock = manager.Lock()
 # time lock
 timing_lock = manager.Lock()
 timeout = 0.1
-PATH = SharedConfig()
-PATH.set_path('data')
+shared_config = SharedConfig()
+shared_config.set_path('data')
 
 def log_time(fov_id: str, process_name: str, event: str):
     with timing_lock:
@@ -60,7 +60,7 @@ def log_time(fov_id: str, process_name: str, event: str):
 
 from simulation import crop_image
 
-def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
+def image_acquisition_simulation(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
 
     image_iterator = get_image()
 
@@ -68,7 +68,11 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
 
     BEGIN = time.time()
     while not shutdown_event.is_set():
-        start_event.wait()        
+
+        #print("Check start event: ", start_event.is_set())
+        if not start_event.is_set():
+            time.sleep(1)
+            continue     
         # construct the iterator
         try:
             fov_id = next(image_iterator)
@@ -103,11 +107,94 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
         time.sleep(1) 
 
         counter += 1
-        if counter == 500:
+        if counter == 10:
             counter = 0
             while start_event.is_set() and not shutdown_event.is_set():
                 time.sleep(1)
             
+from microscope import Microscope
+def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
+
+    microscope = Microscope(is_simulation=True)
+
+    microscope.camera.start_streaming()
+    microscope.camera.set_software_triggered_acquisition()
+    microscope.camera.disable_callback()
+
+    microscope.home_xyz()
+
+    while not shutdown_event.is_set():
+
+        # check if to loading or to scanning position
+        
+        if not start_event.is_set():
+
+            with shared_config.position_lock:
+                
+                if shared_config.to_scanning.value and not shared_config.to_loading.value:
+                    print("Moving to scanning position")
+                    microscope.to_scanning_position()
+                    shared_config.reset_to_scanning()
+                    continue
+                
+                if shared_config.to_loading.value and not shared_config.to_scanning.value:
+                    print("Moving to loading position")
+                    microscope.to_loading_position()
+                    shared_config.reset_to_loading()
+                    continue
+
+            time.sleep(1)
+            continue
+
+        try:
+            for x in range(shared_config.nx.value):
+                for y in range(shared_config.ny.value):
+
+                    fov_id = f"{x}_{y}_0"
+                    log_time(fov_id, "Image Acquisition", "start")
+
+                    channels = ["BF LED matrix left half","BF LED matrix right half","Fluorescence 405 nm Ex"]
+
+                    microscope.set_channel(channels[0])
+                    left_half = microscope.acquire_image()
+                    microscope.set_channel(channels[1])
+                    right_half = microscope.acquire_image()
+                    microscope.set_channel(channels[2])
+                    fluorescent = microscope.acquire_image()
+                    # ducplicate fluorescent from 3k x 3k to 3k x 3k x 3
+                    fluorescent = np.stack([fluorescent,fluorescent,fluorescent],axis=2)
+
+
+                    # left and right should be 2800x2800, if three channels, convert to grayscale
+                    #if left_half.shape[2] == 3:
+                    #    left_half = left_half[:,:,0]
+                    #if right_half.shape[2] == 3:
+                    #    right_half = right_half[:,:,0]
+
+                    print (left_half.shape, right_half.shape, fluorescent.shape)
+
+                    shared_memory_acquisition[fov_id] = {
+                        'left_half': crop_image(left_half),
+                        'right_half': crop_image(right_half),
+                        'fluorescent': crop_image(fluorescent)
+                    }
+
+                    dpc_queue.put(fov_id)
+                    fluorescent_queue.put(fov_id)
+
+                    log_time(fov_id, "Image Acquisition", "end")
+
+                    # move to next position
+                    #microscope.move_y(0.9)
+                #microscope.move_x(0.9)
+        
+        except Exception as e:
+            print(f"Error in image acquisition: {e}")
+
+        while start_event.is_set() and not shutdown_event.is_set():
+            time.sleep(1)
+
+    microscope.close()
 
 from utils import generate_dpc
 
@@ -132,6 +219,14 @@ def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp
             
             with dpc_lock:
                 shared_memory_dpc[fov_id] = {'dpc_image': dpc_image}
+
+            with final_lock:
+                if shared_config.save_raw_images.value:
+                    save_path = shared_config.get_path()
+                    left_filename = f"{fov_id}_left_half.npy"
+                    right_filename = f"{fov_id}_right_half.npy"
+                    np.save(os.path.join(save_path, left_filename), left_half)
+                    np.save(os.path.join(save_path, right_filename), right_half)
             
             output_queue.put(fov_id)
             log_time(fov_id, "DPC Process", "end")
@@ -174,7 +269,7 @@ def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_
         except Empty:
             continue
 
-from utils import remove_background, resize_image_cp, detect_spots, prune_blobs, settings
+from utils import remove_background, resize_image_cp, detect_spots, prune_blobs, settings, seg_spot_filter_one_fov
 
 def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
     
@@ -252,12 +347,13 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
      
                 segmentation_map = shared_memory_segmentation[fov_id]['segmentation_map']
                 spot_list = shared_memory_fluorescent[fov_id]['spot_indices']
+
+                filtered_spots = seg_spot_filter_one_fov(segmentation_map, spot_list)
                 
                 dpc_image = shared_memory_dpc[fov_id]['dpc_image']
                 fluorescence_image = shared_memory_acquisition[fov_id]['fluorescent'].astype(float)/255
                 
-                # print(f"Classification Process: getting spot images for FOV {fov_id} with {len(spot_list)} spots")
-                cropped_images = get_spot_images_from_fov(fluorescence_image,dpc_image,spot_list,r=15)
+                cropped_images = get_spot_images_from_fov(fluorescence_image,dpc_image,filtered_spots,r=15)
                 cropped_images = cropped_images.transpose(0, 3, 1, 2)
 
                 scores1 = run_model(model1,DEVICE,cropped_images,4096)[:,1]
@@ -315,7 +411,7 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
                     scores = shared_memory_classification[fov_id]['scores']
                     
                     SAVE_NUMPYARRAY = True
-                    save_path = PATH.get_path()
+                    save_path = shared_config.get_path()
                     if not SAVE_NUMPYARRAY: 
                         for i, cropped_image in enumerate(cropped_images):
                             filename = os.path.join(save_path, f"{fov_id}_{i}.png")
@@ -323,15 +419,17 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
                             #dpc_image = shared_memory_dpc[fov_id]['dpc_image']*255
                             #save_dpc_image(dpc_image, f'data/{fov_id}.png')
                     else:
-                        filename = os.path.join(save_path, f"{fov_id}.npy")
-                        np.save(filename, cropped_images)
-                        filename = os.path.join(save_path, f"{fov_id}_scores.npy")
-                        np.save(filename, scores)
-                        filename = os.path.join(save_path, f"{fov_id}_overlay.npy")
-                        fluorescent_image = shared_memory_acquisition[fov_id]['fluorescent']
-                        dpc_image = shared_memory_dpc[fov_id]['dpc_image']
-                        img = np.stack([fluorescent_image[:,:,0], fluorescent_image[:,:,1], fluorescent_image[:,:,2], dpc_image], axis=0)
-                        np.save(filename, img)
+                        if shared_config.save_spot_images.value:
+                            filename = os.path.join(save_path, f"{fov_id}.npy")
+                            np.save(filename, cropped_images)
+                            filename = os.path.join(save_path, f"{fov_id}_scores.npy")
+                            np.save(filename, scores)
+                        if shared_config.save_overlay_images.value:
+                            filename = os.path.join(save_path, f"{fov_id}_overlay.npy")
+                            fluorescent_image = shared_memory_acquisition[fov_id]['fluorescent']
+                            dpc_image = shared_memory_dpc[fov_id]['dpc_image']
+                            img = np.stack([fluorescent_image[:,:,0], fluorescent_image[:,:,1], fluorescent_image[:,:,2], dpc_image], axis=0)
+                            np.save(filename, img)
 
                     temp_dict = shared_memory_final[fov_id]
                     temp_dict['saved'] = True
@@ -344,28 +442,6 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
         
         except Empty:
             continue
-
-'''
-def ui_process(input_queue: mp.Queue, output: mp.Queue):
-    while True:
-        try:
-            fov_id = input_queue.get(timeout=timeout)
-            log_time(fov_id, "UI Process", "start")
-            
-            with final_lock:
-                if fov_id in shared_memory_final and not shared_memory_final[fov_id]['displayed']:
-                    # Placeholder for UI update
-                    temp_dict = shared_memory_final[fov_id]
-                    temp_dict['displayed'] = True
-                    shared_memory_final[fov_id] = temp_dict
-
-                    if shared_memory_final[fov_id]['saved']:
-                        output.put(fov_id)
-            
-                    log_time(fov_id, "UI Process", "end")
-        except Empty:
-            continue
-'''
         
 
 def cleanup_process(cleanup_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
@@ -416,7 +492,7 @@ if __name__ == "__main__":
 
     # Create and start processes
     processes = [
-        mp.Process(target=image_acquisition, args=(dpc_queue, fluorescent_queue, shutdown_event,start_event), name="Image Acquisition"),
+        mp.Process(target=image_acquisition_simulation, args=(dpc_queue, fluorescent_queue, shutdown_event,start_event), name="Image Acquisition"),
         mp.Process(target=dpc_process, args=(dpc_queue, segmentation_queue, shutdown_event,start_event), name="DPC Process"),
         mp.Process(target=fluorescent_spot_detection, args=(fluorescent_queue, fluorescent_detection_queue, shutdown_event,start_event), name="Fluorescent Spot Detection"),
         mp.Process(target=saving_process, args=(save_queue, cleanup_queue, shutdown_event,start_event), name="Saving Process"),
@@ -426,7 +502,7 @@ if __name__ == "__main__":
     # Start the UI
     ui_process = mp.Process(target=ui_process, args=(ui_queue, cleanup_queue, shared_memory_final, shared_memory_classification, 
                                             shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
-                                            shared_memory_timing, final_lock, timing_lock,start_event,shutdown_event,PATH), name="UI Process")
+                                            shared_memory_timing, final_lock, timing_lock,start_event,shutdown_event,shared_config), name="UI Process")
 
     ui_process.start()
 

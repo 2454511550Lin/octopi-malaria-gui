@@ -5,13 +5,16 @@ from queue import Empty
 from utils import numpy2png_ui as numpy2png
 import numpy as np
 
+import xml.etree.ElementTree as ET
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QSplitter, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QMessageBox, QStyleFactory, QFileDialog
+    QHeaderView, QAbstractItemView, QMessageBox, QStyleFactory, QFileDialog,
+    QComboBox, QCheckBox, QGroupBox, QGridLayout,QSpinBox, QFrame
 )
-from PyQt5.QtGui import QImage, QColor
+from PyQt5.QtGui import QImage, QColor, QFont
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+
 import pyqtgraph as pg
 from widgets import VirtualImageListWidget, ExpandableImageWidget
 
@@ -26,10 +29,10 @@ class ImageAnalysisUI(QMainWindow):
     shutdown_signal = pyqtSignal()
     
 
-    def __init__(self, start_event,saving_path:SharedConfig):
+    def __init__(self, start_event,shared_config:SharedConfig):
         super().__init__()
         self.start_event = start_event
-        self.saving_path = saving_path
+        self.shared_config = shared_config
         self.setWindowTitle("Octopi")
         self.setGeometry(100, 100, 1920, 1080)
         
@@ -46,6 +49,7 @@ class ImageAnalysisUI(QMainWindow):
         self.setPalette(palette)
         
         self.setStyleSheet("""
+        * { font-size: 20px;  }
             QMainWindow { background-color: #ECF0F1; }
             QTabWidget::pane { border: 1px solid #BDC3C7; background-color: white; }
             QTabBar::tab { 
@@ -67,7 +71,7 @@ class ImageAnalysisUI(QMainWindow):
                 border-radius: 4px;
                 font-weight: bold;
             }
-            QPushButton:hover { background-color: #34495E; }
+            QPushButton:hover { background-color: #357eab; }
             QLineEdit { 
                 padding: 6px; 
                 border: 1px solid #BDC3C7; 
@@ -130,26 +134,23 @@ class ImageAnalysisUI(QMainWindow):
         self.silent_mode_toggle = QPushButton("Silent Mode: Off")
         self.silent_mode_toggle.setCheckable(True)
         self.silent_mode_toggle.clicked.connect(self.toggle_silent_mode)
-        self.silent_mode_toggle.setFixedWidth(170)
-        
+
 
         top_layout.addWidget(self.silent_mode_toggle)
 
         self.new_patient_button = QPushButton("New Patient")
         self.new_patient_button.clicked.connect(self.new_patient)
-        self.new_patient_button.setFixedWidth(120)
         self.new_patient_button.setStyleSheet("""
             QPushButton { 
-                background-color: #28a745; 
+                background-color: #48abe8; 
                 font-weight: bold;
             }
-            QPushButton:hover { background-color: #218838; }
+            QPushButton:hover { background-color: #357eab; }
         """)
         top_layout.addWidget(self.new_patient_button)
 
         self.shutdown_button = QPushButton("Shutdown")
         self.shutdown_button.clicked.connect(self.shutdown)
-        self.shutdown_button.setFixedWidth(120)
         self.shutdown_button.setStyleSheet("""
             QPushButton { 
                 background-color: #dc3545; 
@@ -164,97 +165,79 @@ class ImageAnalysisUI(QMainWindow):
         self.tab_widget = QTabWidget()
         self.main_layout.addWidget(self.tab_widget)
 
-        # Start Tab
+         # Start Tab
         start_tab = QWidget()
-        start_layout = QVBoxLayout(start_tab)
-        
+
+        # Card frame
+        card = QFrame(self)
+        card.setObjectName("card")
+        card.setFixedSize(400, 500)
+        card.setStyleSheet("""
+            #card {
+                background-color: white;
+                border: 1px solid #e0e0e0;
+                border-radius: 25px;
+            }
+        """)
+        card_layout = QVBoxLayout(card)
+
+        # Welcome label
         welcome_label = QLabel("Welcome to Octopi")
         welcome_label.setAlignment(Qt.AlignCenter)
-        welcome_label.setStyleSheet("font-size: 50px; margin-bottom: 20px;")
-        start_layout.addWidget(welcome_label)
-
-        # Directory selection with file system viewer
-        directory_container = QWidget()
-        directory_layout = QVBoxLayout(directory_container)
-        directory_label = QLabel("Select Save Directory:")
-        font = directory_label.font()
-        font.setPointSize(20)
-        directory_label.setFont(font)
-        directory_layout.addWidget(directory_label)
-
-        directory_container = QWidget()
-        directory_layout = QHBoxLayout(directory_container)
-        directory_layout.setContentsMargins(0, 0, 0, 0)
-        directory_label = QLabel("Save Directory:")
-        font = directory_label.font()
-        font.setPointSize(20)
-        directory_label.setFont(font)
-
-        self.directory_input = QLineEdit()
-        font = self.directory_input.font()
-        font.setPointSize(16)
-        self.directory_input.setFont(font)
-        self.directory_input.setPlaceholderText("Enter or select directory")
-        self.directory_input.setMinimumWidth(400)  # Adjust width as needed
-
-        self.browse_button = QPushButton("Browse")
-        self.browse_button.clicked.connect(self.browse_directory)
-        self.browse_button.setStyleSheet("""
-            QPushButton { 
-                color: white; 
-                font-weight: bold;
-                padding: 8px 16px;
-                font-size: 18px;
-            }
+        welcome_label.setStyleSheet("""
+            font-size: 30px;
+            font-weight: bold;
+            color: #2C3E50;
+            padding: 10px;
         """)
 
-        directory_layout.addWidget(directory_label)
-        directory_layout.addWidget(self.directory_input)
-        directory_layout.addWidget(self.browse_button)
-        directory_layout.addStretch()
-        start_layout.addWidget(directory_container, alignment=Qt.AlignCenter)
+        card_layout.addWidget(welcome_label)
 
-        # Patient ID input (centered and compact)
-        patient_id_container = QWidget()
-        patient_id_layout = QHBoxLayout(patient_id_container)
-        patient_id_layout.setContentsMargins(0, 0, 0, 0)
+        # Patient ID input
+        patient_id_layout = QVBoxLayout()
         patient_id_label = QLabel("Patient ID:")
-
-        font = patient_id_label.font()
-        font.setPointSize(20)  # Set the font size to 20
-        patient_id_label.setFont(font)
-
+        patient_id_label.setStyleSheet("""
+            margin-bottom: 0px; 
+        """)
         self.patient_id_input = QLineEdit()
-
-        # Set the font size of the QLineEdit
-        font = self.patient_id_input.font()
-        font.setPointSize(20)  # Set the font size to 20
-        self.patient_id_input.setFont(font)
-
-        self.patient_id_input = QLineEdit()
-        self.patient_id_input.setFixedWidth(200)  # Set a fixed width for the input field
-        font = self.patient_id_input.font()
-        font.setPointSize(20)  # Set the font size to 20
         self.patient_id_input.setPlaceholderText("Enter Patient ID")
+        self.patient_id_input.setStyleSheet("""
+            QLineEdit {
+                border: 2px solid #ccc;
+                border-radius: 4px;
+                margin-bottom: 65px; 
+                margin-top: 1px;
+            }
+        """)
         patient_id_layout.addWidget(patient_id_label)
         patient_id_layout.addWidget(self.patient_id_input)
-        patient_id_layout.addStretch()
-        start_layout.addWidget(patient_id_container, alignment=Qt.AlignCenter|Qt.AlignBottom)
-        
-        self.start_button = QPushButton("Start Analysis")
-        self.start_button.clicked.connect(self.start_analysis)
-        self.start_button.setFixedWidth(300)
+        card_layout.addLayout(patient_id_layout)
+
+        # To Loading Position button
+        self.loading_position_button = QPushButton("To Loading Position")
+        card_layout.addWidget(self.loading_position_button)
+        self.loading_position_button.clicked.connect(self.move_to_loading_position)
+
+        # Start Scanning button
+        self.start_button = QPushButton("Start Scanning")
         self.start_button.setStyleSheet("""
-            QPushButton { 
-                background-color: #28a745; 
-                font-weight: bold;
-                padding: 30px 30px;
-                font-size: 30px;
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                padding: 10px;
+                border: none;
+                border-radius: 4px;
             }
-            QPushButton:hover { background-color: #218838; }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
         """)
-        start_layout.addWidget(self.start_button, alignment=Qt.AlignCenter)
-        
+        card_layout.addWidget(self.start_button)
+        self.start_button.clicked.connect(self.start_analysis)
+
+        start_layout = QHBoxLayout(start_tab)
+        start_layout.addWidget(card, alignment=Qt.AlignCenter)
+
         self.tab_widget.addTab(start_tab, "Start")
 
         # Modify the FOV Tab
@@ -303,9 +286,11 @@ class ImageAnalysisUI(QMainWindow):
         self.update_avg_timer.start(1000) 
 
         self.stats_label_small = QLabel("FoVs: 0 | Total RBCs: 0 | Total Positives: 0")
+        self.stats_label_small.setStyleSheet("""
+            font-size: 14px;
+        """)     
         # add on top of the fov table
         middle_layout.addWidget(self.stats_label_small)
-
 
         self.fov_table = QTableWidget()
         self.fov_table.setColumnCount(3)
@@ -340,11 +325,9 @@ class ImageAnalysisUI(QMainWindow):
 
         self.stats_label = QLabel("FoVs: 0 | Total RBC Count: 0 | Total Malaria Positives: 0")
         self.stats_label.setStyleSheet("""
-            font-weight: bold; 
             margin-top: 10px; 
             margin-bottom: 10px;
             font-size: 50px;
-            font-family: Arial, sans-serif;
             color: black;
         """)
         self.cropped_layout.addWidget(self.stats_label)
@@ -353,6 +336,90 @@ class ImageAnalysisUI(QMainWindow):
         self.cropped_layout.addWidget(self.virtual_image_list)
 
         self.tab_widget.addTab(self.cropped_tab, "Malaria Detection Report")
+
+        # A tab for live view
+        live_view_tab = QWidget()
+        live_view_layout = QVBoxLayout(live_view_tab)
+
+
+        # Channel selection
+        channel_group = QGroupBox("Channel Selection")
+        channel_layout = QHBoxLayout(channel_group)
+        self.channel_combo = QComboBox()
+        self.load_channels()
+        channel_layout.addWidget(self.channel_combo, alignment=Qt.AlignTop | Qt.AlignLeft)
+        live_view_layout.addWidget(channel_group)
+
+        # Microscope controls
+       
+        self.live_button = QPushButton("LIVE")
+        self.live_button.clicked.connect(self.start_live_view)
+
+        live_view_layout.addWidget(self.live_button, alignment=Qt.AlignTop | Qt.AlignLeft)
+
+        live_view_layout.addStretch(1)
+
+
+        self.tab_widget.addTab(live_view_tab, "Live View")
+        
+
+        # a tab for settings
+        settings_tab = QWidget()
+        settings_layout = QVBoxLayout(settings_tab)
+
+        # Directory selection
+        directory_group = QGroupBox("Save Directory")
+        directory_layout = QHBoxLayout(directory_group)
+        self.directory_input = QLineEdit()
+        # set a fixed width for the input field
+        self.directory_input.setFixedWidth(500)
+        # set a default input
+        self.directory_input.setText(os.path.join(os.getcwd(), "saved_data"))
+        self.browse_button = QPushButton("Browse")
+        self.browse_button.clicked.connect(self.browse_directory)
+        directory_layout.addWidget(self.directory_input)
+        directory_layout.addWidget(self.browse_button)
+        settings_layout.addWidget(directory_group, alignment=Qt.AlignTop | Qt.AlignLeft)
+
+        # Image options
+        options_group = QGroupBox("Image Saving Options")
+        options_layout = QVBoxLayout(options_group)
+        self.raw_images_check = QCheckBox("Raw Images")
+        self.overlay_images_check = QCheckBox("Overlay Images")
+        self.positives_images_check = QCheckBox("Spots Images")
+        self.raw_images_check.setChecked(True)
+        self.overlay_images_check.setChecked(True)
+        self.positives_images_check.setChecked(True)
+        options_layout.addWidget(self.raw_images_check)
+        options_layout.addWidget(self.overlay_images_check)
+        options_layout.addWidget(self.positives_images_check)
+        settings_layout.addWidget(options_group, alignment=Qt.AlignTop | Qt.AlignLeft)
+
+
+        # Position selection
+        position_group = QGroupBox("Field of View Selection")
+        position_layout = QGridLayout(position_group)
+        position_layout.addWidget(QLabel("X:"), 0, 0)
+        self.x_input = QSpinBox()
+        self.x_input.setRange(1, 100)  # Adjust the range as needed
+        self.x_input.setValue(1)  # Set default value to 1
+        self.x_input.setStyleSheet("QSpinBox { width: 1px; height: 25px; }")
+        position_layout.addWidget(self.x_input, 0, 1)
+        position_layout.addWidget(QLabel("Y:"), 1, 0)
+        self.y_input = QSpinBox()
+        self.y_input.setRange(1, 100)  # Adjust the range as needed
+        self.y_input.setValue(1)  # Set default value to 1
+        self.y_input.setStyleSheet("QSpinBox { width: 1px; height: 25px; }")
+        position_layout.addWidget(self.y_input, 1, 1)
+        # shrink the first column to a certain ratio
+        position_layout.setColumnStretch(0, 1)
+        position_layout.setColumnStretch(1, 5)
+        settings_layout.addWidget(position_group, alignment=Qt.AlignTop | Qt.AlignLeft)
+
+        settings_layout.addStretch(1)
+
+        settings_tab.setLayout(settings_layout)
+        self.tab_widget.addTab(settings_tab, "Settings")
 
     def setup_fov_image_view(self):
         self.fov_image_view.ui.roiBtn.hide()
@@ -369,7 +436,65 @@ class ImageAnalysisUI(QMainWindow):
             self.positive_images_widget.set_invisaible()
         else:
             self.positive_images_widget.set_visible()
+    
+    def load_channels(self):
+        try:
+            tree = ET.parse('channel_configurations.xml')
+            root = tree.getroot()
+            channels = [mode.get('Name') for mode in root.findall('mode')]
+            self.channel_combo.addItems(channels)
+        except ET.ParseError as e:
+            print(f"Error parsing XML: {e}")
+        except FileNotFoundError:
+            print("channel_configurations.xml file not found")
 
+    def start_live_view(self):
+        
+        # check what is the text of the button
+        if self.live_button.text() == "LIVE (Running)":
+            self.live_button.setText("LIVE")
+            self.live_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #2C3E50;
+                }
+                QPushButton:hover { background-color: #357eab; }
+            """)
+
+        else:
+            self.live_button.setText("LIVE (Running)")
+        # change the color 
+            self.live_button.setStyleSheet("""
+                QPushButton { 
+                    background-color: #48abe8; 
+                }
+                QPushButton:hover { background-color: #357eab; }
+            """)
+
+
+    def move_to_loading_position(self):
+        if self.loading_position_button.text() == "To Loading Position":
+
+            with self.shared_config.position_lock:
+                if not self.shared_config.to_scanning.value:
+                    self.shared_config.set_to_loading()   
+                    self.loading_position_button.setText("To Scanning Position")
+                    self.loading_position_button.setStyleSheet("""
+                        QPushButton { 
+                            background-color: #48abe8; 
+                        }
+                        QPushButton:hover { background-color: #357eab; }
+                    """)
+        else:
+            with self.shared_config.position_lock:
+                if not self.shared_config.to_loading.value:
+                    self.shared_config.set_to_scanning()
+                    self.loading_position_button.setText("To Loading Position")
+                    self.loading_position_button.setStyleSheet("""
+                        QPushButton {
+                            background-color: #2C3E50;
+                        }
+                        QPushButton:hover { background-color: #357eab; }
+                    """)
 
     def shutdown(self):
         self.shutdown_signal.emit()
@@ -398,7 +523,7 @@ class ImageAnalysisUI(QMainWindow):
         # Clear the patient ID input and re-enable the start button
         self.patient_id_input.clear()
         self.start_button.setEnabled(True)
-        self.start_button.setText("Start Analysis")
+        self.start_button.setText("Start Scanning")
         
         # Switch back to the start tab
         self.tab_widget.setCurrentIndex(0)
@@ -409,7 +534,7 @@ class ImageAnalysisUI(QMainWindow):
     def update_avg_processing_time(self):
         if self.first_fov_time is not None and self.latest_fov_time:
             total_time = self.latest_fov_time - self.first_fov_time
-            avg_time = total_time / len(self.fov_data) 
+            avg_time = total_time / len(self.fov_data) if len(self.fov_data) > 0 else 0
             self.avg_processing_time_label.setText(f"Avg Processing Time: {avg_time:.3f} s")
         else:
             self.avg_processing_time_label.setText("Avg Processing Time: N/A")
@@ -532,7 +657,7 @@ class ImageAnalysisUI(QMainWindow):
         else:
             print(f"FOV {fov_id} not in cache. It may need to be loaded.")
             # load from the local disk
-            filename = f"{self.saving_path.get_path()}/{fov_id}_overlay.npy"
+            filename = f"{self.shared_config.get_path()}/{fov_id}_overlay.npy"
             img_array = np.load(filename)
             self.fov_image_cache[fov_id] = numpy2png(img_array, resize_factor=0.5)
             # delete the oldest image
@@ -599,6 +724,10 @@ class ImageAnalysisUI(QMainWindow):
         if not directory:
             QMessageBox.warning(self, "Input Error", "Please enter or select a directory for saving data.")
             return
+        
+        if self.loading_position_button.text() == "To Scanning Position":
+            QMessageBox.warning(self, "Input Error", "Please return to the loading position before starting the analysis.")
+            return
 
         # Create patient directory
         patient_directory = os.path.join(directory, self.patient_id)
@@ -607,14 +736,21 @@ class ImageAnalysisUI(QMainWindow):
         except OSError as e:
             QMessageBox.critical(self, "Error", f"Failed to create patient directory: {e}")
             return
-        self.saving_path.set_path(patient_directory)
+        
+        self.shared_config.set_path(patient_directory)
+        
+        self.shared_config.save_raw_images.value = self.raw_images_check.isChecked()
+        self.shared_config.save_overlay_images.value = self.overlay_images_check.isChecked()
+        self.shared_config.save_spot_images.value = self.positives_images_check.isChecked()
+        self.shared_config.nx.value = self.x_input.value()
+        self.shared_config.ny.value = self.y_input.value()
+        
+
         self.patient_id_label.setText(f"Patient ID: {self.patient_id}")
         self.start_event.set()  # Signal the main process to start
         self.tab_widget.setCurrentIndex(1)  # Switch to FOVs List tab
         self.start_button.setEnabled(False)
-        self.start_button.setText("In Progress")
-
-
+        self.start_button.setText("Scanning in progress")
 
 class UIThread(QThread):
     update_fov = pyqtSignal(str)
@@ -723,11 +859,11 @@ class UIThread(QThread):
 
 def ui_process(input_queue, output, shared_memory_final, shared_memory_classification, 
                shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
-               shared_memory_timing, final_lock, timing_lock, start_event, shutdown_event, saving_path):
+               shared_memory_timing, final_lock, timing_lock, start_event, shutdown_event, shared_config):
 
     app = QApplication(sys.argv)
     pg.setConfigOptions(imageAxisOrder='row-major')
-    window = ImageAnalysisUI(start_event, saving_path)
+    window = ImageAnalysisUI(start_event, shared_config)
     
     ui_thread = UIThread(input_queue, output, shared_memory_final, shared_memory_classification, 
                          shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 

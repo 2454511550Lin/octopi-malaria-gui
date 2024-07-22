@@ -48,3 +48,28 @@ def crop_image(image):
     parameters['crop_y1'] = 2900
 
     return image[parameters['crop_y0']:parameters['crop_y1'], parameters['crop_x0']:parameters['crop_x1']]
+
+
+
+
+'''
+def ui_process(input_queue: mp.Queue, output: mp.Queue):
+    while True:
+        try:
+            fov_id = input_queue.get(timeout=timeout)
+            log_time(fov_id, "UI Process", "start")
+            
+            with final_lock:
+                if fov_id in shared_memory_final and not shared_memory_final[fov_id]['displayed']:
+                    # Placeholder for UI update
+                    temp_dict = shared_memory_final[fov_id]
+                    temp_dict['displayed'] = True
+                    shared_memory_final[fov_id] = temp_dict
+
+                    if shared_memory_final[fov_id]['saved']:
+                        output.put(fov_id)
+            
+                    log_time(fov_id, "UI Process", "end")
+        except Empty:
+            continue
+'''

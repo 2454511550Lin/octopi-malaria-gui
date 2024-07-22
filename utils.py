@@ -181,17 +181,52 @@ def process_spots(I_background_removed,I_raw,spot_list,i,j,k,settings,I_mask=Non
 	spot_data_pd = extract_spot_data(I_background_removed,I_raw,spot_list,i,j,k,settings)
 	return spot_list, spot_data_pd
 
-def generate_dpc(I1,I2,use_gpu=False):
-	if use_gpu:
-		# img_dpc = cp.divide(img_left_gpu - img_right_gpu, img_left_gpu + img_right_gpu)
-		# to add
-		I_dpc = 0
-	else:
-		I_dpc = np.divide(I1-I2,I1+I2)
-		I_dpc = I_dpc + 0.5
-	I_dpc[I_dpc<0] = 0
-	I_dpc[I_dpc>1] = 1
-	return I_dpc
+
+def seg_spot_filter_one_fov(mask, spots, crop_offset_x=100, crop_offset_y=100, overlap_threshold=6/9):
+    
+    # Erode the mask
+    kernel = np.ones((3, 3), np.uint8)
+    eroded_mask = cv2.erode(mask, kernel)
+    
+    # List to store overlapping spots
+    overlapping_spots = []
+    
+    # Process each spot
+    for spot in spots:
+        x, y, radius = spot[:3]  # We don't use the radius in this function, but we keep it for the output
+        x, y = int(x), int(y)
+        
+        # Calculate overlap
+        roi = eroded_mask[crop_offset_y+y-1:crop_offset_y+y+2, crop_offset_x+x-1:crop_offset_x+x+2]
+        if roi.size == 9:  # Ensure we have a full 3x3 region
+            overlap = np.sum(roi > 0) / 9
+            
+            # If overlap is above threshold, add to list of overlapping spots
+            if overlap >= overlap_threshold:
+                overlapping_spots.append(spot)
+    
+    # Convert list of overlapping spots to numpy array
+    return np.array(overlapping_spots)
+
+def generate_dpc(I1, I2, use_gpu=False):
+    if use_gpu:
+        # GPU implementation is not provided, so I'll leave a placeholder
+        # You might want to implement this using a GPU library like CuPy
+        I_dpc = 0  # Placeholder
+    else:
+        # Add a small constant to avoid divide-by-zero
+        epsilon = 1e-10
+        
+        # Compute the sum once
+        I_sum = I1 + I2 + epsilon
+        
+        # Compute DPC
+        I_dpc = np.divide(I1 - I2, I_sum)
+        
+        # Shift and clip values
+        I_dpc = np.clip(I_dpc + 0.5, 0, 1)
+    
+    return I_dpc
 
 def get_spot_images_from_fov(I_fluorescence,I_dpc,spot_list,r=15):
     if(len(I_dpc.shape)==3):
@@ -261,7 +296,7 @@ def numpy2png_ui(img, resize_factor=5):
         img_fluorescence = (img_fluorescence * 255).astype(np.uint8)
 
         # Normalize the DPC image
-        img_dpc = (img_dpc - img_dpc.min()) / (img_dpc.max() - img_dpc.min())
+        img_dpc = (img_dpc - img_dpc.min()) / (img_dpc.max() - img_dpc.min() + epsilon)
         img_dpc = (img_dpc * 255).astype(np.uint8)
         img_dpc = np.dstack([img_dpc, img_dpc, img_dpc])  # Make it 3 channels
 
@@ -298,9 +333,31 @@ class SharedConfig:
     def __init__(self):
         self.manager = mp.Manager()
         self.path = self.manager.Value('s', '')  # 's' for string
+        self.save_raw_images = self.manager.Value('b', False)      # 'b' for boolean
+        self.save_overlay_images = self.manager.Value('b', False)  # 'b' for boolean
+        self.save_spot_images = self.manager.Value('b', False)     # 'b' for boolean
+        self.nx = self.manager.Value('i', 0)  # 'i' for integer
+        self.ny = self.manager.Value('i', 0)  # 'i' for integer
+
+
+        self.position_lock = self.manager.Lock()
+        self.to_loading = self.manager.Value('b', False)  # 'b' for boolean
+        self.to_scanning = self.manager.Value('b', False)  # 'b' for boolean
 
     def set_path(self, new_path):
         self.path.value = new_path
 
     def get_path(self):
         return self.path.value
+    
+    def set_to_loading(self):
+        self.to_loading.value = True
+
+    def set_to_scanning(self):
+        self.to_scanning.value = True
+
+    def reset_to_loading(self):
+        self.to_loading.value = False
+
+    def reset_to_scanning(self):    
+        self.to_scanning.value = False
