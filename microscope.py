@@ -6,6 +6,7 @@ import control.core as core
 import control.camera as camera
 import control.microcontroller as microcontroller
 import control.serial_peripherals as serial_peripherals
+import control.utils as utils
 
 from qtpy.QtCore import *
 from qtpy.QtWidgets import *
@@ -150,14 +151,27 @@ class Microscope(QObject):
         self.navigationController.set_y_limit_neg_mm(SOFTWARE_POS_LIMIT.Y_NEGATIVE)
 
     def move_x(self,distance,blocking=False):
-        self.microcontroller.move_x(distance)
+        self.navigationController.move_x(distance)
         if blocking:
             self._wait_till_operation_is_completed()
 
     def move_y(self,distance,blocking=False):
-        self.microcontroller.move_y(distance)
+        self.navigationController.move_y(distance)
         if blocking:
             self._wait_till_operation_is_completed()
+
+    def move_z_to(self,z_mm,blocking=True):
+        clear_backlash = True if (z_mm < self.navigationController.z_pos_mm and self.navigationController.get_pid_control_flag(2)==False) else False
+        # clear backlash if moving backward in open loop mode
+        self.navigationController.move_z_to(z_mm)
+        if blocking:
+            self._wait_till_operation_is_completed()
+            if clear_backlash:
+                _usteps_to_clear_backlash = 160
+                self.navigationController.move_z_usteps(-_usteps_to_clear_backlash)
+                self._wait_till_operation_is_completed()
+                self.navigationController.move_z_usteps(_usteps_to_clear_backlash)
+                self._wait_till_operation_is_completed()
 
     # def to_loading_position(self):
     #     self.slidePositionController.move_to_slide_loading_position()
@@ -323,6 +337,52 @@ class Microscope(QObject):
                 self._wait_till_operation_is_completed()
             self.slidePositionController.objective_retracted = False
             print('z position restored')
+
+    def run_autofocus(self, step_size_mm = [0.1, 0.01, 0.0015], star_z_mm = 3, end_z_mm = 7):
+        # Constants
+        START_Z_MM = 3
+        END_Z_MM = 7
+        STEP_SIZES_MM = [0.1, 0.01, 0.0015]  # Specified step sizes
+
+        def focus_search(start_z_mm, end_z_mm, step_size_mm):
+            z_positions = np.arange(start_z_mm, end_z_mm + step_size_mm/2, step_size_mm)
+            focus_measures = []
+
+            for z in z_positions:
+                self.move_z_to(z)
+                image = self.acquire_image()
+                focus_measure = utils.calculate_focus_measure(image, FOCUS_MEASURE_OPERATOR)
+                focus_measures.append(focus_measure)
+
+            best_focus_index = np.argmax(focus_measures)
+            return z_positions[best_focus_index], focus_measures[best_focus_index]
+
+        # Move to start position (this will apply backlash compensation if moving down)
+        self.move_z_to(START_Z_MM)
+
+        best_z = START_Z_MM
+        best_focus = float('-inf')
+
+        for i, step_size in enumerate(step_size_mm):
+            print(f"Stage {i+1}: step size = {step_size:.4f} mm")
+            search_range = min(step_size * 10, END_Z_MM - START_Z_MM)  # Search range is 10x the step size, but not larger than full range
+            if search_range <= step_size:
+                continue
+            start_z = max(START_Z_MM, best_z - search_range/2)
+            end_z = min(END_Z_MM, best_z + search_range/2)
+            stage_best_z, stage_best_focus = focus_search(start_z, end_z, step_size)
+
+            if stage_best_focus > best_focus:
+                best_z = stage_best_z
+                best_focus = stage_best_focus
+
+            print(f"Stage {i+1} best focus: z = {best_z:.6f} mm, focus measure = {best_focus:.2f}")
+
+        # Move to the best focus position
+        self.move_z_to(best_z)
+
+        print(f"Final best focus found at z = {best_z:.6f} mm with focus measure: {best_focus:.2f}")
+        return best_z, best_focus
 
     def start_live(self):
         self.camera.start_streaming()
