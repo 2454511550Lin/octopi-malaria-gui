@@ -269,8 +269,8 @@ def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp
             log_time(fov_id, "DPC Process", "start")
             
             data = shared_memory_acquisition[fov_id]
-            left_half = data['left_half'].astype(float)/255
-            right_half = data['right_half'].astype(float)/255
+            left_half = data['left_half'].astype(np.float16)/255
+            right_half = data['right_half'].astype(np.float16)/255
             
             dpc_image = generate_dpc(left_half, right_half,use_gpu=False) 
 
@@ -424,7 +424,7 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                     filtered_spots = seg_spot_filter_one_fov(segmentation_map, spot_list)
                 
                     dpc_image = shared_memory_dpc[fov_id]['dpc_image']
-                    fluorescence_image = shared_memory_acquisition[fov_id]['fluorescent'].astype(float)/255
+                    fluorescence_image = shared_memory_acquisition[fov_id]['fluorescent'].astype(np.float16)/255
                 
                     cropped_images = get_spot_images_from_fov(fluorescence_image,dpc_image,filtered_spots,r=15)
                     cropped_images = cropped_images.transpose(0, 3, 1, 2)
@@ -505,6 +505,8 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
                             fluorescent_image = shared_memory_acquisition[fov_id]['fluorescent']
                             dpc_image = shared_memory_dpc[fov_id]['dpc_image']
                             img = np.stack([fluorescent_image[:,:,0], fluorescent_image[:,:,1], fluorescent_image[:,:,2], dpc_image], axis=0)
+                            # check what floating point accuracy it's using
+                            print("Overlay image shape: ", img.shape, img.dtype)
                             np.save(filename, img)
 
                     temp_dict = shared_memory_final[fov_id]
