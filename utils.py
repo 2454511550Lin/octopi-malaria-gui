@@ -252,7 +252,7 @@ def get_spot_images_from_fov(I_fluorescence,I_dpc,spot_list,r=15):
     height,width,channels = I_fluorescence.shape
 
     num_spots = len(spot_list)
-    I = np.zeros((num_spots, 2*r+1, 2*r+1, 4), float)  # preallocate memory
+    I = np.zeros((num_spots, 2*r+1, 2*r+1, 4), np.float16)  # preallocate memory
 
     for counter, s in enumerate(spot_list):
         x = int(s[0])
