@@ -34,7 +34,7 @@ def resize_image_cp(I,downsize_factor=4):
 def remove_background(img_cpu, return_gpu_image=True):
 	tophat = cv2.getStructuringElement(2, ksize=(17,17))
 	tophat_gpu = cp.asarray(tophat)
-	img_g_gpu = cp.asarray(img_cpu)
+	img_g_gpu = cp.asarray(img_cpu, dtype=cp.float16)
 	img_th_gpu = img_g_gpu
 	for k in range(3):
 		img_th_gpu[:,:,k] = cupyx.scipy.ndimage.white_tophat(img_g_gpu[:,:,k], footprint=tophat_gpu)
@@ -46,7 +46,7 @@ def remove_background(img_cpu, return_gpu_image=True):
 def gaussian_kernel_1d(n, std, normalized=True):
     if normalized:
         return cp.asarray(signal.gaussian(n, std))/(np.sqrt(2 * np.pi)*std)
-    return cp.asarray(signal.gaussian(n, std))
+    return cp.asarray(signal.gaussian(n, std), dtype=cp.float16)
 
 def detect_spots(I, thresh = 12):
     # filters
@@ -61,7 +61,7 @@ def detect_spots(I, thresh = 12):
         gauss_filters_1d.append(gauss_filt_1d)
     # apply all filters
     if len(I.shape) == 3:
-        I = cp.average(I, axis=2, weights=cp.array([0.299,0.587,0.114]))
+        I = cp.average(I, axis=2, weights=cp.array([0.299,0.587,0.114],dtype=cp.float16))
     filtered_imgs = []
     for i in range(len(gauss_filters_1d)): # apply LoG filters
         filt_img = cupyx.scipy.ndimage.convolve(I, gauss_filters_1d[i])
@@ -105,7 +105,7 @@ def prune_blobs(spots_list):
 
 def highlight_spots(I,spot_list,contrast_boost=1.6):
 	# bgremoved_fluorescence_spotBoxed = np.copy(bgremoved_fluorescence)
-	I = I.astype('float')/255 # this copies the image
+	I = I.astype('float16')/255 # this copies the image
 	I = I*contrast_boost # enhance contrast
 	for s in spot_list:
 		add_bounding_box(I,int(s[0]),int(s[1]),int(s[2]))
@@ -138,8 +138,8 @@ def extract_spot_data(I_background_removed,I_raw,spot_list,i,j,k,settings,extens
 	downsize_factor=settings['spot_detection_downsize_factor']
 	extension = extension*downsize_factor
 	ny, nx, nc = I_background_removed.shape
-	I_background_removed = I_background_removed.astype('float')
-	I_raw = I_raw/255
+	I_background_removed = I_background_removed.astype('float16')
+	I_raw = I_raw.astype('float16')/255
 	columns = ['FOV_row','FOV_col','FOV_z','x','y','r','R','G','B','R_max','G_max','B_max','lap_total','lap_max','numPixels','numSaturatedPixels','idx']
 	spot_data_pd = pd.DataFrame(columns=columns)
 	idx = 0
@@ -216,7 +216,7 @@ def generate_dpc(I1, I2, use_gpu=False):
         I2 = cp.asarray(I2)
 
         # Add a small constant to avoid divide-by-zero
-        epsilon = cp.float32(1e-7)
+        epsilon = cp.float16(1e-7)
 
         # Compute the sum once
         I_sum = I1 + I2 + epsilon
@@ -232,7 +232,7 @@ def generate_dpc(I1, I2, use_gpu=False):
 
     else:
         # Add a small constant to avoid divide-by-zero
-        epsilon = 1e-7
+        epsilon = np.float16(1e-7)
         
         # Compute the sum once
         I_sum = I1 + I2 + epsilon
