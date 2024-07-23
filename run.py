@@ -419,6 +419,7 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                 segmentation_map = shared_memory_segmentation[fov_id]['segmentation_map']
                 spot_list = shared_memory_fluorescent[fov_id]['spot_indices']
 
+
                 if len(spot_list) > 0:
 
                     filtered_spots = seg_spot_filter_one_fov(segmentation_map, spot_list)
@@ -435,6 +436,7 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                     # use whichever smaller as the final score
                     scores = np.minimum(scores1,scores2)
                 else:
+                    filtered_spots = np.array([])
                     scores = np.array([])
                     cropped_images = np.array([])
 

@@ -32,16 +32,26 @@ def resize_image_cp(I,downsize_factor=4):
 	return(I_resized)
 
 def remove_background(img_cpu, return_gpu_image=True):
-	tophat = cv2.getStructuringElement(2, ksize=(17,17))
-	tophat_gpu = cp.asarray(tophat)
-	img_g_gpu = cp.asarray(img_cpu, dtype=cp.float16)
-	img_th_gpu = img_g_gpu
-	for k in range(3):
-		img_th_gpu[:,:,k] = cupyx.scipy.ndimage.white_tophat(img_g_gpu[:,:,k], footprint=tophat_gpu)
-	if return_gpu_image:
-		return img_th_gpu
-	else:
-		return cp.asnumpy(img_th_gpu)
+    # check if the cp device is available
+    if not cp.is_available():
+        raise Exception("No GPU device found")
+    device_id = cp.cuda.Device()
+    with cp.cuda.Device(device_id):
+        tophat = cv2.getStructuringElement(2, ksize=(17,17))
+        tophat_gpu = cp.asarray(tophat)
+        img_g_gpu = cp.asarray(img_cpu, dtype=cp.float16)
+        img_th_gpu = img_g_gpu
+        for k in range(3):
+            img_th_gpu[:,:,k] = cupyx.scipy.ndimage.white_tophat(img_g_gpu[:,:,k], footprint=tophat_gpu)
+        if return_gpu_image:
+            result = img_th_gpu
+        else:
+            result = cp.asnumpy(img_th_gpu)
+         
+        del tophat_gpu, img_g_gpu
+        cp.get_default_memory_pool().free_all_blocks()
+    
+    return result
 
 def gaussian_kernel_1d(n, std, normalized=True):
     if normalized:
@@ -50,38 +60,45 @@ def gaussian_kernel_1d(n, std, normalized=True):
 
 def detect_spots(I, thresh = 12):
     # filters
-    gauss_rs = np.array([4,6,8,10])
-    gauss_sigmas = np.array([1,1.5,2,2.5])
-    gauss_ts = np.divide(gauss_rs - 0.5,gauss_sigmas) # truncate value (to get desired radius)
-    lapl_kernel = cp.array([[0,1,0],[1,-4,1],[0,1,0]])
-    gauss_filters_1d = []
-    for i in range(gauss_rs.shape[0]):
-        gauss_filt_1d = gaussian_kernel_1d(gauss_rs[i]*2+1,gauss_sigmas[i],True)
-        gauss_filt_1d = gauss_filt_1d.reshape(-1, 1)
-        gauss_filters_1d.append(gauss_filt_1d)
-    # apply all filters
-    if len(I.shape) == 3:
-        I = cp.average(I, axis=2, weights=cp.array([0.299,0.587,0.114],dtype=cp.float16))
-    filtered_imgs = []
-    for i in range(len(gauss_filters_1d)): # apply LoG filters
-        filt_img = cupyx.scipy.ndimage.convolve(I, gauss_filters_1d[i])
-        filt_img = cupyx.scipy.ndimage.convolve(filt_img, gauss_filters_1d[i].transpose())
-        filt_img = cupyx.scipy.ndimage.convolve(filt_img, lapl_kernel)
-        filt_img *= -(gauss_sigmas[i]**2)
-        filtered_imgs.append(filt_img)
-    img_max_proj = cp.max(np.stack(filtered_imgs), axis=0)
-    img_max_filt = cupyx.scipy.ndimage.maximum_filter(img_max_proj, size=3)
-    img_max_filt[img_max_filt < thresh] = 0
-    img_traceback = cp.zeros(img_max_filt.shape)
-    for i in range(len(filtered_imgs)):
-        img_traceback[img_max_filt == filtered_imgs[i]] = i+1
-    ind = np.where(img_traceback != 0)
-    spots = np.zeros((ind[0].shape[0],3))
-    for i in range(ind[0].shape[0]):
-        spots[i][0] = int(ind[1][i])
-        spots[i][1] = int(ind[0][i])
-        spots[i][2] = int(img_traceback[spots[i][1]][spots[i][0]])
-    spots = spots.astype(int)
+    # check if the cp device is available
+    if not cp.is_available():
+        raise Exception("No GPU device found")
+    device_id = cp.cuda.Device()
+    with cp.cuda.Device(device_id):
+        gauss_rs = np.array([4,6,8,10])
+        gauss_sigmas = np.array([1,1.5,2,2.5])
+        gauss_ts = np.divide(gauss_rs - 0.5,gauss_sigmas) # truncate value (to get desired radius)
+        lapl_kernel = cp.array([[0,1,0],[1,-4,1],[0,1,0]])
+        gauss_filters_1d = []
+        for i in range(gauss_rs.shape[0]):
+            gauss_filt_1d = gaussian_kernel_1d(gauss_rs[i]*2+1,gauss_sigmas[i],True)
+            gauss_filt_1d = gauss_filt_1d.reshape(-1, 1)
+            gauss_filters_1d.append(gauss_filt_1d)
+        # apply all filters
+        if len(I.shape) == 3:
+            I = cp.average(I, axis=2, weights=cp.array([0.299,0.587,0.114],dtype=cp.float16))
+        filtered_imgs = []
+        for i in range(len(gauss_filters_1d)): # apply LoG filters
+            filt_img = cupyx.scipy.ndimage.convolve(I, gauss_filters_1d[i])
+            filt_img = cupyx.scipy.ndimage.convolve(filt_img, gauss_filters_1d[i].transpose())
+            filt_img = cupyx.scipy.ndimage.convolve(filt_img, lapl_kernel)
+            filt_img *= -(gauss_sigmas[i]**2)
+            filtered_imgs.append(filt_img)
+        img_max_proj = cp.max(np.stack(filtered_imgs), axis=0)
+        img_max_filt = cupyx.scipy.ndimage.maximum_filter(img_max_proj, size=3)
+        img_max_filt[img_max_filt < thresh] = 0
+        img_traceback = cp.zeros(img_max_filt.shape)
+        for i in range(len(filtered_imgs)):
+            img_traceback[img_max_filt == filtered_imgs[i]] = i+1
+        ind = np.where(img_traceback != 0)
+        spots = np.zeros((ind[0].shape[0],3))
+        for i in range(ind[0].shape[0]):
+            spots[i][0] = int(ind[1][i])
+            spots[i][1] = int(ind[0][i])
+            spots[i][2] = int(img_traceback[spots[i][1]][spots[i][0]])
+        spots = spots.astype(int)
+
+        cp.get_default_memory_pool().free_all_blocks()
     return spots
 
 # filter spots to avoid overlapping ones
