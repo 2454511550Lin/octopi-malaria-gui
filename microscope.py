@@ -367,7 +367,6 @@ class Microscope(QObject):
         '''
 
     def run_autofocus(self, step_size_mm = [0.1, 0.01, 0.0015], start_z_mm = 3, end_z_mm = 7):
-
         def focus_search(start_z_mm, end_z_mm, step_size_mm):
             z_positions = np.arange(start_z_mm, end_z_mm + step_size_mm/2, step_size_mm)
             focus_measures = []
@@ -377,10 +376,11 @@ class Microscope(QObject):
                 image = self.acquire_image()
                 focus_measure = utils.calculate_focus_measure(image, FOCUS_MEASURE_OPERATOR)
                 focus_measures.append(focus_measure)
-
-            #print(z_positions)
-            #print(focus_measures)
-
+            
+            # print a table of z positions and focus measures
+            print("Z position (mm) | Focus measure")
+            for z, focus_measure in zip(z_positions, focus_measures):
+                print(f"{z:.3f} | {focus_measure:.2f}")
             best_focus_index = np.argmax(focus_measures)
             return z_positions[best_focus_index], focus_measures[best_focus_index]
 
@@ -392,11 +392,18 @@ class Microscope(QObject):
 
         for i, step_size in enumerate(step_size_mm):
             print(f"Stage {i+1}: step size = {step_size:.4f} mm")
-            search_range = min(step_size * 10, end_z_mm - start_z_mm)  # Search range is 10x the step size, but not larger than full range
+            search_range = min(step_size * 10, end_z_mm - start_z_mm)
             if search_range <= step_size:
                 continue
-            start_z = max(start_z_mm, best_z - search_range/2)
-            end_z = min(end_z_mm, best_z + search_range/2)
+            
+            if i == 0:  # First stage
+                start_z = start_z_mm
+                end_z = end_z_mm
+            else:
+                start_z = max(start_z_mm, best_z - search_range/2)
+                end_z = min(end_z_mm, best_z + search_range/2)
+
+            print(f"Searching in range: {start_z:.6f} mm to {end_z:.6f} mm")
             stage_best_z, stage_best_focus = focus_search(start_z, end_z, step_size)
 
             if stage_best_focus > best_focus:
@@ -409,6 +416,7 @@ class Microscope(QObject):
         self.move_z_to(best_z)
 
         print(f"Final best focus found at z = {best_z:.6f} mm with focus measure: {best_focus:.2f}")
+    
         return best_z
 
     def start_live(self):

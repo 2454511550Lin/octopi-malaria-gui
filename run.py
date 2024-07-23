@@ -40,8 +40,8 @@ shared_config = SharedConfig()
 shared_config.set_path('data')
 
 
-INIT_FOCUS_RANGE_START_MM = 6
-INIT_FOCUS_RANGE_END_MM = 7
+INIT_FOCUS_RANGE_START_MM = 6.2
+INIT_FOCUS_RANGE_END_MM = 6.7
 SCAN_FOCUS_SEARCH_RANGE_MM = 0.1
 
 SAVE_NPY = False
@@ -173,7 +173,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
             # do auto focus
             # set the chanel to BF
             microscope.set_channel("BF LED matrix left half")
-            microscope.run_autofocus(step_size_mm = [0.1, 0.01, 0.0015], start_z_mm = INIT_FOCUS_RANGE_START_MM, end_z_mm = INIT_FOCUS_RANGE_END_MM)
+            microscope.run_autofocus(step_size_mm = [0.01, 0.001, 0.0015], start_z_mm = INIT_FOCUS_RANGE_START_MM, end_z_mm = INIT_FOCUS_RANGE_END_MM)
 
             # generate the focus map
             # scan settings
@@ -216,13 +216,6 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                     microscope.move_y_to(y)
                     prev_y = y
                 microscope.move_z_to(z)
-                #coordinates.append({
-                #    'i': i,
-                #    'x_mm': x,
-                #    'y_mm': y,
-                #    'z_mm': z,
-                #    'time': time.time()
-                #})
                 fov_id = f"{i}"
                 log_time(fov_id, "Image Acquisition", "start")
                 channels = ["BF LED matrix left half","BF LED matrix right half","Fluorescence 405 nm Ex"]
@@ -235,11 +228,13 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                 fluorescent = microscope.acquire_image()
 
                 shared_config.set_live_view_image(crop_image(left_half))
-                # ducplicate fluorescent from 3k x 3k to 3k x 3k x 3
+                
                 if not simulation:
                     # go from 3k x 3k x 3 to 3k x 3k, take the middle channel
                     left_half = left_half[:,:,1]
                     right_half = right_half[:,:,1]
+                    # for fluorescent (3k x 3k x 3), we reverse the channel order
+                    fluorescent = fluorescent[:, :, ::-1]
                 else:
                     fluorescent = np.stack([fluorescent,fluorescent,fluorescent],axis=2)
 
@@ -255,49 +250,6 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                 fluorescent_queue.put(fov_id)
 
                 log_time(fov_id, "Image Acquisition", "end")
-
-            '''
-            for x in range(shared_config.nx.value):
-                for y in range(shared_config.ny.value):
-
-                    fov_id = f"{x}_{y}_0"
-                    log_time(fov_id, "Image Acquisition", "start")
-
-                    channels = ["BF LED matrix left half","BF LED matrix right half","Fluorescence 405 nm Ex"]
-
-                    microscope.set_channel(channels[0])
-                    left_half = microscope.acquire_image()
-                    microscope.set_channel(channels[1])
-                    right_half = microscope.acquire_image()
-                    microscope.set_channel(channels[2])
-                    fluorescent = microscope.acquire_image()
-
-                    shared_config.set_live_view_image(crop_image(left_half))
-                    # ducplicate fluorescent from 3k x 3k to 3k x 3k x 3
-                    if not simulation:
-                        # go from 3k x 3k x 3 to 3k x 3k, take the middle channel
-                        left_half = left_half[:,:,1]
-                        right_half = right_half[:,:,1]
-                    else:
-                        fluorescent = np.stack([fluorescent,fluorescent,fluorescent],axis=2)
-
-                    print (left_half.shape, right_half.shape, fluorescent.shape)
-
-                    shared_memory_acquisition[fov_id] = {
-                        'left_half': crop_image(left_half),
-                        'right_half': crop_image(right_half),
-                        'fluorescent': crop_image(fluorescent)
-                    }
-
-                    dpc_queue.put(fov_id)
-                    fluorescent_queue.put(fov_id)
-
-                    log_time(fov_id, "Image Acquisition", "end")
-
-                    # move to next position
-                    #microscope.move_y(0.9)
-                #microscope.move_x(0.9)
-            '''
         except Exception as e:
             print(f"Error in image acquisition: {e}")
 
@@ -468,6 +420,7 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                 spot_list = shared_memory_fluorescent[fov_id]['spot_indices']
 
                 if len(spot_list) > 0:
+
                     filtered_spots = seg_spot_filter_one_fov(segmentation_map, spot_list)
                 
                     dpc_image = shared_memory_dpc[fov_id]['dpc_image']
@@ -479,7 +432,6 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                     scores1 = run_model(model1,DEVICE,cropped_images,4096)[:,1]
                     scores2 = run_model(model2,DEVICE,cropped_images,4096)[:,1]
 
-
                     # use whichever smaller as the final score
                     scores = np.minimum(scores1,scores2)
                 else:
@@ -490,7 +442,8 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                 with classification_lock:
                     shared_memory_classification[fov_id] = {
                         'cropped_images': cropped_images,
-                        'scores': scores
+                        'scores': scores,
+                        'filtered_spots_count': len(filtered_spots)
                     }
                 
                 # Update shared_memory_final
@@ -581,7 +534,7 @@ def cleanup_process(cleanup_queue: mp.Queue,shutdown_event: mp.Event,start_event
                 
                 print(f"\n{'=' * 50}")
                 print(f"Report for FOV {fov_id}:")
-                print(f"RBC counts: {shared_memory_segmentation[fov_id]['n_cells']}, spots: {len(shared_memory_fluorescent[fov_id]['spot_indices'])}")
+                print(f"RBC counts: {shared_memory_segmentation[fov_id]['n_cells']}, spots: {len(shared_memory_fluorescent[fov_id]['spot_indices'])},filtered spots: {shared_memory_classification[fov_id]['filtered_spots_count']}")
                 print(f"{'=' * 50}")
                 report(timing_data, fov_id)
                 #print(f"Average time for one FOV: {(shared_memory_timing['END'] - shared_memory_timing['START'])/(len(shared_memory_timing)-2)}")

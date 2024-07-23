@@ -211,12 +211,28 @@ def seg_spot_filter_one_fov(mask, spots, crop_offset_x=100, crop_offset_y=100, o
 
 def generate_dpc(I1, I2, use_gpu=False):
     if use_gpu:
-        # GPU implementation is not provided, so I'll leave a placeholder
-        # You might want to implement this using a GPU library like CuPy
-        I_dpc = 0  # Placeholder
+        # Convert numpy arrays to CuPy arrays
+        I1 = cp.asarray(I1)
+        I2 = cp.asarray(I2)
+
+        # Add a small constant to avoid divide-by-zero
+        epsilon = cp.float32(1e-7)
+
+        # Compute the sum once
+        I_sum = I1 + I2 + epsilon
+
+        # Compute DPC
+        I_dpc = cp.divide(I1 - I2, I_sum)
+
+        # Shift and clip values
+        I_dpc = cp.clip(I_dpc + 0.5, 0, 1)
+
+        # Convert the result back to a numpy array
+        I_dpc = cp.asnumpy(I_dpc)
+
     else:
         # Add a small constant to avoid divide-by-zero
-        epsilon = 1e-10
+        epsilon = 1e-7
         
         # Compute the sum once
         I_sum = I1 + I2 + epsilon

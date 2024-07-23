@@ -703,7 +703,7 @@ class ImageAnalysisUI(QMainWindow):
             try:
                 filename = f"{self.shared_config.get_path()}/{fov_id}_overlay.npy"
                 img_array = np.load(filename)
-                self.fov_image_cache[fov_id] = numpy2png(img_array, resize_factor=0.5)
+                self.fov_image_cache[fov_id] = numpy2png(img_array, resize_factor=None)
                 # delete the oldest image
                 if len(self.fov_image_cache) > self.max_cache_size:
                     oldest_fov = next(iter(self.fov_image_cache))
