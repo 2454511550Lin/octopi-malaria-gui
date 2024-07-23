@@ -347,6 +347,11 @@ class Microscope(QObject):
                 self._wait_till_operation_is_completed()
 
         # restore z
+               
+        self.navigationController.move_z_to(OBJECTIVE_DEFAULT_POS_MM)
+        self._wait_till_operation_is_completed()
+        print('z position restored')
+        '''
         if self.slidePositionController.objective_retracted:
             if self.navigationController.get_pid_control_flag(2) is False:
                 _usteps_to_clear_backlash = max(160,20*self.navigationController.z_microstepping)
@@ -358,7 +363,8 @@ class Microscope(QObject):
                 self.navigationController.microcontroller.move_z_to_usteps(self.slidePositionController.z_pos)
                 self._wait_till_operation_is_completed()
             self.slidePositionController.objective_retracted = False
-            print('z position restored')
+            
+        '''
 
     def run_autofocus(self, step_size_mm = [0.1, 0.01, 0.0015], start_z_mm = 3, end_z_mm = 7):
 
@@ -371,6 +377,9 @@ class Microscope(QObject):
                 image = self.acquire_image()
                 focus_measure = utils.calculate_focus_measure(image, FOCUS_MEASURE_OPERATOR)
                 focus_measures.append(focus_measure)
+
+            #print(z_positions)
+            #print(focus_measures)
 
             best_focus_index = np.argmax(focus_measures)
             return z_positions[best_focus_index], focus_measures[best_focus_index]

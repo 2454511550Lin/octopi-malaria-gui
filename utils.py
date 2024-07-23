@@ -11,6 +11,7 @@ import numpy as np
 from scipy import signal
 import pandas as pd
 
+
 def imread_gcsfs(fs,file_path):
 	img_bytes = fs.cat(file_path)
 	I = imageio.core.asarray(imageio.imread(img_bytes, "bmp"))
@@ -321,8 +322,8 @@ def save_flourescence_image(img,filename):
 	imageio.imwrite(filename + "_fluorescence.png", np.uint8(img))
 def save_dpc_image(img,filename):
 	# grey scale image
-	print("grey scale image shape",img.shape)	
-	#img = np.dstack([img,img,img])
+	img = img*255.0
+	
 	imageio.imwrite(filename + "_dpc.png", np.uint8(img))
 	
 
@@ -344,9 +345,8 @@ class SharedConfig:
         self.live_channel_selected = self.manager.Value('i', 0)
         self.live_channels_list = self.manager.list(["BF LED matrix left half","BF LED matrix right half","Fluorescence 405 nm Ex"])
         
-        # Fixed 3000x3000 image size
-        self.IMAGE_SHAPE = (3000, 3000)
-        self.IMAGE_SIZE = self.IMAGE_SHAPE[0] * self.IMAGE_SHAPE[1]
+        self.IMAGE_SHAPE = (2800, 2800,3)
+        self.IMAGE_SIZE = self.IMAGE_SHAPE[0] * self.IMAGE_SHAPE[1] * self.IMAGE_SHAPE[2]
         self.live_view_image_array = mp.RawArray('f', self.IMAGE_SIZE)
         self.live_view_image_lock = mp.Lock()
         self.frame_rate = self.manager.Value('f', 30.0)
@@ -376,7 +376,12 @@ class SharedConfig:
 
     def set_live_view_image(self, np_array):
         if np_array.shape != self.IMAGE_SHAPE:
-            raise ValueError(f"Input array must have shape {self.IMAGE_SHAPE}")
+            # if only the first two dimension match
+            if np_array.shape[:2] == self.IMAGE_SHAPE[:2]:
+                 # copy the single changle to all channels
+                np_array = np.repeat(np_array[:, :, np.newaxis], 3, axis=2)
+            else:
+                raise ValueError(f"Input array must have shape {self.IMAGE_SHAPE}, instead got {np_array.shape}")
         
         with self.live_view_image_lock:
             # Create a numpy array backed by shared memory

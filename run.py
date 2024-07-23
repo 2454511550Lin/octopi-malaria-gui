@@ -10,7 +10,7 @@ from simulation import get_image
 import threading
 from log import report
 
-from utils import SharedConfig
+from utils import SharedConfig, numpy2png
 
 # Existing shared memory managers
 manager = mp.Manager()
@@ -40,9 +40,11 @@ shared_config = SharedConfig()
 shared_config.set_path('data')
 
 
-INIT_FOCUS_RANGE_START_MM = 3
+INIT_FOCUS_RANGE_START_MM = 6
 INIT_FOCUS_RANGE_END_MM = 7
 SCAN_FOCUS_SEARCH_RANGE_MM = 0.1
+
+SAVE_NPY = False
 
 def log_time(fov_id: str, process_name: str, event: str):
     with timing_lock:
@@ -64,6 +66,7 @@ def log_time(fov_id: str, process_name: str, event: str):
         shared_memory_timing[fov_id] = temp_dict
 
 from simulation import crop_image
+from control.utils import generate_scan_grid,interpolate_focus
 
 def image_acquisition_simulation(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
 
@@ -168,8 +171,92 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
 
         try:
             # do auto focus
+            # set the chanel to BF
+            microscope.set_channel("BF LED matrix left half")
             microscope.run_autofocus(step_size_mm = [0.1, 0.01, 0.0015], start_z_mm = INIT_FOCUS_RANGE_START_MM, end_z_mm = INIT_FOCUS_RANGE_END_MM)
 
+            # generate the focus map
+            # scan settings
+            dx_mm = 0.9
+            dy_mm = 0.9
+            Nx = shared_config.nx.value
+            Ny = shared_config.ny.value
+            Nx_focus = 2
+            Ny_focus = 2
+            offset_x_mm = microscope.get_x()
+            offset_y_mm = microscope.get_y()
+            offset_z_mm = microscope.get_z()
+
+            # generate scan grid
+            scan_grid = generate_scan_grid(dx_mm, dy_mm, Nx, Ny, offset_x_mm, offset_y_mm, S_scan=True)
+
+            # generate focus map
+            x = offset_x_mm + np.linspace(0, (Nx - 1) * dx_mm, Nx_focus)
+            y = offset_y_mm + np.linspace(0, (Ny - 1) * dy_mm, Ny_focus)
+            focus_map = []
+            microscope.set_channel("BF LED matrix left half")
+            for yi in y:
+                microscope.move_y_to(yi)
+                for xi in x:
+                    microscope.move_x_to(xi)
+                    z_focus = microscope.run_autofocus(step_size_mm = [0.01, 0.0015], start_z_mm = offset_z_mm - SCAN_FOCUS_SEARCH_RANGE_MM/2, end_z_mm = offset_z_mm + SCAN_FOCUS_SEARCH_RANGE_MM/2)
+                    focus_map.append((xi, yi, z_focus))
+                    offset_z_mm = z_focus
+            print("Focus map: ",focus_map)
+            z_map = interpolate_focus(scan_grid, focus_map)
+
+            # scan using focus map
+            prev_x, prev_y = None, None
+            coordinates = []
+            for i, ((x, y), z) in enumerate(zip(scan_grid, z_map)):
+                if x != prev_x:
+                    microscope.move_x_to(x)
+                    prev_x = x
+                if y != prev_y:
+                    microscope.move_y_to(y)
+                    prev_y = y
+                microscope.move_z_to(z)
+                #coordinates.append({
+                #    'i': i,
+                #    'x_mm': x,
+                #    'y_mm': y,
+                #    'z_mm': z,
+                #    'time': time.time()
+                #})
+                fov_id = f"{i}"
+                log_time(fov_id, "Image Acquisition", "start")
+                channels = ["BF LED matrix left half","BF LED matrix right half","Fluorescence 405 nm Ex"]
+
+                microscope.set_channel(channels[0])
+                left_half = microscope.acquire_image()
+                microscope.set_channel(channels[1])
+                right_half = microscope.acquire_image()
+                microscope.set_channel(channels[2])
+                fluorescent = microscope.acquire_image()
+
+                shared_config.set_live_view_image(crop_image(left_half))
+                # ducplicate fluorescent from 3k x 3k to 3k x 3k x 3
+                if not simulation:
+                    # go from 3k x 3k x 3 to 3k x 3k, take the middle channel
+                    left_half = left_half[:,:,1]
+                    right_half = right_half[:,:,1]
+                else:
+                    fluorescent = np.stack([fluorescent,fluorescent,fluorescent],axis=2)
+
+                print (left_half.shape, right_half.shape, fluorescent.shape)
+
+                shared_memory_acquisition[fov_id] = {
+                    'left_half': crop_image(left_half),
+                    'right_half': crop_image(right_half),
+                    'fluorescent': crop_image(fluorescent)
+                }
+
+                dpc_queue.put(fov_id)
+                fluorescent_queue.put(fov_id)
+
+                log_time(fov_id, "Image Acquisition", "end")
+
+            '''
             for x in range(shared_config.nx.value):
                 for y in range(shared_config.ny.value):
 
@@ -184,6 +271,8 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                     right_half = microscope.acquire_image()
                     microscope.set_channel(channels[2])
                     fluorescent = microscope.acquire_image()
+
+                    shared_config.set_live_view_image(crop_image(left_half))
                     # ducplicate fluorescent from 3k x 3k to 3k x 3k x 3
                     if not simulation:
                         # go from 3k x 3k x 3 to 3k x 3k, take the middle channel
@@ -208,7 +297,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                     # move to next position
                     #microscope.move_y(0.9)
                 #microscope.move_x(0.9)
-        
+            '''
         except Exception as e:
             print(f"Error in image acquisition: {e}")
 
@@ -217,7 +306,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
 
     microscope.close()
 
-from utils import generate_dpc
+from utils import generate_dpc,save_dpc_image
 
 def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
     while not shutdown_event.is_set():
@@ -244,10 +333,18 @@ def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp
             with final_lock:
                 if shared_config.save_raw_images.value:
                     save_path = shared_config.get_path()
-                    left_filename = f"{fov_id}_left_half.npy"
-                    right_filename = f"{fov_id}_right_half.npy"
-                    np.save(os.path.join(save_path, left_filename), left_half)
-                    np.save(os.path.join(save_path, right_filename), right_half)
+                    if SAVE_NPY:
+                        left_filename = f"{fov_id}_left_half.npy"
+                        right_filename = f"{fov_id}_right_half.npy"
+                        np.save(os.path.join(save_path, left_filename), left_half)
+                        np.save(os.path.join(save_path, right_filename), right_half)
+                    else:
+                        # save the png
+                        left_filename = f"{fov_id}_left_half"
+                        right_filename = f"{fov_id}_right_half"
+                        save_dpc_image(left_half, os.path.join(save_path, left_filename))
+                        #save_dpc_image(right_half, os.path.join(save_path, right_filename))
+                                  
             
             output_queue.put(fov_id)
             log_time(fov_id, "DPC Process", "end")
