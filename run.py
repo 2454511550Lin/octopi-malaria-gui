@@ -44,7 +44,7 @@ INIT_FOCUS_RANGE_START_MM = 6.2
 INIT_FOCUS_RANGE_END_MM = 6.7
 SCAN_FOCUS_SEARCH_RANGE_MM = 0.1
 
-SAVE_NPY = False
+SAVE_NPY = True
 
 def log_time(fov_id: str, process_name: str, event: str):
     with timing_lock:
@@ -115,7 +115,7 @@ def image_acquisition_simulation(dpc_queue: mp.Queue, fluorescent_queue: mp.Queu
         time.sleep(1) 
 
         counter += 1
-        if counter == 500:
+        if counter == 10:
             counter = 0
             while start_event.is_set() and not shutdown_event.is_set():
                 time.sleep(1)
@@ -295,8 +295,7 @@ def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp
                         left_filename = f"{fov_id}_left_half"
                         right_filename = f"{fov_id}_right_half"
                         save_dpc_image(left_half, os.path.join(save_path, left_filename))
-                        #save_dpc_image(right_half, os.path.join(save_path, right_filename))
-                                  
+                        save_dpc_image(right_half, os.path.join(save_path, right_filename))         
             
             output_queue.put(fov_id)
             log_time(fov_id, "DPC Process", "end")
@@ -485,7 +484,7 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
                 if fov_id in shared_memory_final and not shared_memory_final[fov_id]['saved']:
                     
                     # save the cropped images to png
-                    cropped_images = shared_memory_classification[fov_id]['cropped_images']*255
+                    cropped_images = (shared_memory_classification[fov_id]['cropped_images']*255).astype(np.uint8)
                     scores = shared_memory_classification[fov_id]['scores']
                     
                     SAVE_NUMPYARRAY = True
@@ -506,12 +505,12 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
                             filename = os.path.join(save_path, f"{fov_id}_overlay.npy")
                             fluorescent_image = shared_memory_acquisition[fov_id]['fluorescent']
                             dpc_image = shared_memory_dpc[fov_id]['dpc_image']
-                            img = np.stack([fluorescent_image[:,:,0], fluorescent_image[:,:,1], fluorescent_image[:,:,2], dpc_image], axis=0)
-                            # check what floating point accuracy it's using
-                            print("Overlay image shape: ", img.shape, img.dtype)
+                            fluorescent_image_int8 = (fluorescent_image * 255).astype(np.uint8)
+                            dpc_image_int8 = (dpc_image * 255).astype(np.uint8)
+                            img = np.stack([fluorescent_image_int8[:,:,0], fluorescent_image_int8[:,:,1], fluorescent_image_int8[:,:,2], dpc_image_int8], axis=0)
                             np.save(filename, img)
 
-                    temp_dict = shared_memory_final[fov_id]
+                    temp_dict = shssared_memory_final[fov_id]
                     temp_dict['saved'] = True
                     shared_memory_final[fov_id] = temp_dict
 
@@ -572,7 +571,7 @@ if __name__ == "__main__":
 
     # Create and start processes
     processes = [
-        mp.Process(target=image_acquisition, args=(dpc_queue, fluorescent_queue, shutdown_event,start_event), name="Image Acquisition"),
+        mp.Process(target=image_acquisition_simulation, args=(dpc_queue, fluorescent_queue, shutdown_event,start_event), name="Image Acquisition"),
         mp.Process(target=dpc_process, args=(dpc_queue, segmentation_queue, shutdown_event,start_event), name="DPC Process"),
         mp.Process(target=fluorescent_spot_detection, args=(fluorescent_queue, fluorescent_detection_queue, shutdown_event,start_event), name="Fluorescent Spot Detection"),
         mp.Process(target=saving_process, args=(save_queue, cleanup_queue, shutdown_event,start_event), name="Saving Process"),
