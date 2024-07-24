@@ -36,7 +36,7 @@ class ResNet(nn.Module):
   
 
 # runs model
-def run_model(model, device, images, batch_size_inference=1024):
+def run_model(model, device, images, batch_size_inference=512):
 
     return generate_predictions(model,device,images,batch_size_inference)
 

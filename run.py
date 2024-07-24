@@ -339,6 +339,7 @@ def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_
             continue
 
 from utils import remove_background, resize_image_cp, detect_spots, prune_blobs, settings, seg_spot_filter_one_fov
+MAX_SPOTS_THRESHOLD = 5000  # Maximum number of spots allowed
 
 def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
     
@@ -355,15 +356,23 @@ def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shu
             spot_list = detect_spots(resize_image_cp(I_fluorescence_bg_removed,
                                                      downsize_factor=settings['spot_detection_downsize_factor']),
                                                      thresh=settings['spot_detection_threshold'])
-            print(f"FOV {fov_id} detected {len(spot_list)} spots")
-            if len(spot_list) > 0:
-                spot_list = prune_blobs(spot_list)
+            #print(f"FOV {fov_id} detected {len(spot_list)} spots")
+            if len(spot_list) > MAX_SPOTS_THRESHOLD:
+                print(f"Abnormal number of fluorescent spots detected in FOV {fov_id}: {len(spot_list)}")
+                spot_list = []  
+  
+            else:
+                if len(spot_list) > 0:
+                    spot_list = prune_blobs(spot_list)
 
-            # scale coordinates for full-res image
-            spot_list = spot_list*settings['spot_detection_downsize_factor']
+                spot_list = spot_list*settings['spot_detection_downsize_factor']
             
             with fluorescent_lock:
-                shared_memory_fluorescent[fov_id] = {'spot_indices': spot_list}
+                    shared_memory_fluorescent[fov_id] = {
+                        'spot_indices': spot_list,
+                        'abnormal_spots': len(spot_list) > MAX_SPOTS_THRESHOLD,
+                        'spot_count': -1
+                    }
             
             output_queue.put(fov_id)
             log_time(fov_id, "Fluorescent Spot Detection", "end")
@@ -510,7 +519,7 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
                             img = np.stack([fluorescent_image_int8[:,:,0], fluorescent_image_int8[:,:,1], fluorescent_image_int8[:,:,2], dpc_image_int8], axis=0)
                             np.save(filename, img)
 
-                    temp_dict = shssared_memory_final[fov_id]
+                    temp_dict = shared_memory_final[fov_id]
                     temp_dict['saved'] = True
                     shared_memory_final[fov_id] = temp_dict
 
