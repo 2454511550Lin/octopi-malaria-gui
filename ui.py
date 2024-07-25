@@ -423,14 +423,14 @@ class ImageAnalysisUI(QMainWindow):
         position_layout = QGridLayout(position_group)
         position_layout.addWidget(QLabel("X:"), 0, 0)
         self.x_input = QSpinBox()
-        self.x_input.setRange(1, 100)  # Adjust the range as needed
-        self.x_input.setValue(1)  # Set default value to 1
+        self.x_input.setRange(2, 50)  # Adjust the range as needed
+        self.x_input.setValue(2)  # Set default value to 1
         self.x_input.setStyleSheet("QSpinBox { width: 1px; height: 25px; }")
         position_layout.addWidget(self.x_input, 0, 1)
         position_layout.addWidget(QLabel("Y:"), 1, 0)
         self.y_input = QSpinBox()
-        self.y_input.setRange(1, 100)  # Adjust the range as needed
-        self.y_input.setValue(1)  # Set default value to 1
+        self.y_input.setRange(2, 20)  # Adjust the range as needed
+        self.y_input.setValue(2)  # Set default value to 1
         self.y_input.setStyleSheet("QSpinBox { width: 1px; height: 25px; }")
         position_layout.addWidget(self.y_input, 1, 1)
         # shrink the first column to a certain ratio
