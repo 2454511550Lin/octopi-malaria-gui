@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import os
 
-PATH = 'data/pat'
+PATH = './sample_inputs'
 
 def get_fov_id(path):
     # go though the bmp files in the path
@@ -15,17 +15,32 @@ def get_fov_id(path):
         if file.endswith('.bmp'):
             # split with "_" and take the first three, then assemble them together with "_"
             fov_id.append('_'.join(file.split('_')[:3]))
+    # Get the unique FOV IDs
+    unique_fov_ids = list(set(fov_id))
     
-    return list(set(fov_id))
+    # Calculate how many times we need to repeat the FOVs to reach 50
+    repeat_count = (50 + len(unique_fov_ids) - 1) // len(unique_fov_ids)
+    
+    # Repeat the FOV IDs to reach at least 50
+    extended_fov_ids = unique_fov_ids * repeat_count
+    
+    # Trim to exactly 50 FOVs if we've exceeded
+    extended_fov_ids = extended_fov_ids[:50]
+    
+    return extended_fov_ids
 
 # now given the list of fov, create a iterator to read the images
 def get_image():
 
     fov_id = get_fov_id(PATH)
-    print(len(fov_id))
+
+    j = 0
+
     for fov in fov_id:
         # yield left_half, right half, and floresence image sequentially
-        yield fov
+        yield str(j)
+
+        j += 1
 
         left_half = cv2.imread(os.path.join(PATH, fov + '_BF_LED_matrix_left_half.bmp'))  
 
