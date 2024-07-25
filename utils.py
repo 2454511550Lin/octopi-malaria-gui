@@ -366,7 +366,6 @@ def save_dpc_image(img,filename):
 settings = {'spot_detection_downsize_factor': 4, 'spot_detection_threshold': 10}
 
 import torch.multiprocessing as mp
-from log import setup_logger
 class SharedConfig:
     def __init__(self):
         self.manager = mp.Manager()

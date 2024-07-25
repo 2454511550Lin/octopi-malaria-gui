@@ -8,7 +8,7 @@ import time
 
 from simulation import get_image
 import threading
-from log import report, setup_logger
+from log import report
 
 from utils import SharedConfig, numpy2png
 
@@ -516,8 +516,8 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
                             filename = os.path.join(save_path, f"{fov_id}_overlay.npy")
                             fluorescent_image = shared_memory_acquisition[fov_id]['fluorescent']
                             dpc_image = shared_memory_dpc[fov_id]['dpc_image']
-                            fluorescent_image_int8 = (fluorescent_image * 255).astype(np.uint8)
-                            dpc_image_int8 = (dpc_image * 255).astype(np.uint8)
+                            fluorescent_image_int8 = fluorescent_image.astype(np.uint8)
+                            dpc_image_int8 = (dpc_image*255).astype(np.uint8)
                             img = np.stack([fluorescent_image_int8[:,:,0], fluorescent_image_int8[:,:,1], fluorescent_image_int8[:,:,2], dpc_image_int8], axis=0)
                             np.save(filename, img)
 
@@ -573,6 +573,14 @@ def cleanup_process(cleanup_queue: mp.Queue,shutdown_event: mp.Event,start_event
 from ui import ui_process
 
 if __name__ == "__main__":
+
+    # get the first cmd argument
+    import sys
+    if len(sys.argv) > 1:
+        simulation = sys.argv[1] == "simulation"
+    else:
+        simulation = False
+
     # Create queues
     dpc_queue = mp.Queue()
     fluorescent_queue = mp.Queue()
@@ -590,7 +598,7 @@ if __name__ == "__main__":
 
     # Create and start processes
     processes = [
-        mp.Process(target=image_acquisition_simulation, args=(dpc_queue, fluorescent_queue, shutdown_event,start_event), name="Image Acquisition"),
+        mp.Process(target=image_acquisition_simulation if simulation else image_acquisition, args=(dpc_queue, fluorescent_queue, shutdown_event,start_event), name="Image Acquisition"),
         mp.Process(target=dpc_process, args=(dpc_queue, segmentation_queue, shutdown_event,start_event), name="DPC Process"),
         mp.Process(target=fluorescent_spot_detection, args=(fluorescent_queue, fluorescent_detection_queue, shutdown_event,start_event), name="Fluorescent Spot Detection"),
         mp.Process(target=saving_process, args=(save_queue, cleanup_queue, shutdown_event,start_event), name="Saving Process"),

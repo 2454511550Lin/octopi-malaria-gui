@@ -97,7 +97,7 @@ class ImageAnalysisUI(QMainWindow):
         self.image_cache = {}
         self.fov_image_cache = {}
         self.fov_data = {}
-        self.max_cache_size = 10
+        self.max_cache_size = 1
         self.current_fov_index = -1
         self.selected_fov_id = None
 
@@ -703,6 +703,7 @@ class ImageAnalysisUI(QMainWindow):
                 filename = f"{self.shared_config.get_path()}/{fov_id}_overlay.npy"
                 img_array = np.load(filename)
                 img_array = img_array.astype(np.float16) / 255.0
+                #print(f"Loading fov {fov_id} with shape {img_array.shape} and dtype {img_array.dtype}")
                 self.fov_image_cache[fov_id] = numpy2png(img_array, resize_factor=None)
                 # delete the oldest image
                 if len(self.fov_image_cache) > self.max_cache_size:
@@ -727,10 +728,11 @@ class ImageAnalysisUI(QMainWindow):
 
     def create_overlay(self, dpc_image, fluorescent_image):
         # stack fluorescent and DPC images to 4xHxW
-        dpc_image = dpc_image.astype(np.float32) / 255.0 if dpc_image.dtype == np.uint8 else dpc_image
-        fluorescent_image = fluorescent_image.astype(np.float32) / 255.0 if fluorescent_image.dtype == np.uint8 else fluorescent_image
+        dpc_image = dpc_image.astype(np.float16) / 255.0 if dpc_image.dtype == np.uint8 else dpc_image
+        fluorescent_image = fluorescent_image.astype(np.float16) / 255.0 if fluorescent_image.dtype == np.uint8 else fluorescent_image
         # then direcly call numpy2png
         img = np.stack([fluorescent_image[:,:,0], fluorescent_image[:,:,1], fluorescent_image[:,:,2], dpc_image], axis=0)
+        #print(f"Overlay image shape: {img.shape} and dtype {img.dtype}")
         img =  numpy2png(img,resize_factor=0.5)
         
         return img
