@@ -254,6 +254,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                 log_time(fov_id, "Image Acquisition", "end")
         except Exception as e:
             logger.error(f"Error in image acquisition: {e}")
+            continue
 
         while start_event.is_set() and not shutdown_event.is_set():
             time.sleep(1)
@@ -276,10 +277,8 @@ def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp
             
             dpc_image = generate_dpc(left_half, right_half,use_gpu=False) 
 
-            try:
-                assert dpc_image.shape == (2800, 2800)
-            except AssertionError:
-                main_logger.info(f"FOV {fov_id} DPC image shape is {dpc_image.shape} but not (2800, 2800)")
+            assert dpc_image.shape == (2800, 2800)
+            
             
             with dpc_lock:
                 shared_memory_dpc[fov_id] = {'dpc_image': dpc_image}
@@ -302,6 +301,10 @@ def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp
             output_queue.put(fov_id)
             log_time(fov_id, "DPC Process", "end")
         except Empty:
+            continue
+        except Exception as e:
+            logger = shared_config.setup_process_logger()
+            logger.error(f"Unknown error in DPC process {e}")
             continue
 
 
@@ -339,6 +342,10 @@ def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_
             log_time(fov_id, "Segmentation Process", "end")
         except Empty:
             continue
+        except Exception as e:
+            logger = shared_config.setup_process_logger()
+            logger.error(f"Unknown error in segmentation process {e}")
+            continue
 
 from utils import remove_background, resize_image_cp, detect_spots, prune_blobs, settings, seg_spot_filter_one_fov
 MAX_SPOTS_THRESHOLD = 5000  # Maximum number of spots allowed
@@ -362,13 +369,13 @@ def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shu
             #main_logger.info(f"FOV {fov_id} detected {len(spot_list)} spots")
             if len(spot_list) > MAX_SPOTS_THRESHOLD:
                 logger.info(f"Abnormal number of fluorescent spots detected in FOV {fov_id}: {len(spot_list)}")
-                spot_list = []  
-  
-            else:
-                if len(spot_list) > 0:
-                    spot_list = prune_blobs(spot_list)
-
-                spot_list = spot_list*settings['spot_detection_downsize_factor']
+                # select the first 5k spots
+                #spot_list = spot_list[:MAX_SPOTS_THRESHOLD]
+            
+            if len(spot_list) > 0:
+                spot_list = prune_blobs(spot_list)
+                
+            spot_list = spot_list*settings['spot_detection_downsize_factor']
             
             with fluorescent_lock:
                     shared_memory_fluorescent[fov_id] = {
@@ -381,6 +388,9 @@ def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shu
             log_time(fov_id, "Fluorescent Spot Detection", "end")
 
         except Empty:
+            continue
+        except Exception as e:
+            logger.error(f"Unknown error in fluorescent spot detection {e}")
             continue
 
 from utils import get_spot_images_from_fov
@@ -475,8 +485,10 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
 
                 log_time(fov_id, "Classification Process", "end")
 
+        except Empty:
+            continue
         except Exception as e:
-            logger.error(f"Error in classification process: {e}")
+            logger.error(f"Unknown error in classification process {e}")
             continue
 
 from utils import numpy2png
@@ -532,6 +544,10 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
         
         except Empty:
             continue
+        except Exception as e:
+            logger = shared_config.setup_process_logger()
+            logger.error(f"Unknown error in saving process {e}")
+            continue
         
 
 def cleanup_process(cleanup_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
@@ -568,6 +584,10 @@ def cleanup_process(cleanup_queue: mp.Queue,shutdown_event: mp.Event,start_event
                 else:
                     logger.error(f"Warning: FOV {fov_id} may not have been completely removed from all shared memories")
         except Empty:
+            continue
+        except Exception as e:
+            logger = shared_config.setup_process_logger()
+            logger.error(f"Unknown error in cleanup process {e}")
             continue
 
 from ui import ui_process
@@ -634,7 +654,10 @@ if __name__ == "__main__":
     finally:
         shutdown_event.set()
         for p in processes:
-            p.join(timeout=0.1)  # Give processes more time to shut down
+            if p.name == "Image Acquisition":
+                p.join(timeout=2)  # Give image acquisition process more time to shut down
+            else:
+                p.join(timeout=0.1)  # Give other processes more time to shut down
             if p.is_alive():
                 #logger.info(f"Force terminating process {p.name}")
                 print(f"Force terminating process {p.name}")
