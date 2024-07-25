@@ -345,10 +345,12 @@ def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_
         except Exception as e:
             logger = shared_config.setup_process_logger()
             logger.error(f"Unknown error in segmentation process {e}")
+            with segmentation_lock:
+                shared_memory_segmentation[fov_id] = {'segmentation_map': np.zeros((2800, 2800)), 'n_cells': 0}
             continue
 
 from utils import remove_background, resize_image_cp, detect_spots, prune_blobs, settings, seg_spot_filter_one_fov
-MAX_SPOTS_THRESHOLD = 5000  # Maximum number of spots allowed
+MAX_SPOTS_THRESHOLD = 8000  # Maximum number of spots allowed
 
 def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
     
@@ -369,19 +371,18 @@ def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shu
             #main_logger.info(f"FOV {fov_id} detected {len(spot_list)} spots")
             if len(spot_list) > MAX_SPOTS_THRESHOLD:
                 logger.info(f"Abnormal number of fluorescent spots detected in FOV {fov_id}: {len(spot_list)}")
-                # select the first 5k spots
-                #spot_list = spot_list[:MAX_SPOTS_THRESHOLD]
+                spot_list = spot_list[:MAX_SPOTS_THRESHOLD]
             
             if len(spot_list) > 0:
                 spot_list = prune_blobs(spot_list)
-                
+
             spot_list = spot_list*settings['spot_detection_downsize_factor']
             
             with fluorescent_lock:
                     shared_memory_fluorescent[fov_id] = {
                         'spot_indices': spot_list,
                         'abnormal_spots': len(spot_list) > MAX_SPOTS_THRESHOLD,
-                        'spot_count': -1
+                        'spot_count': len(spot_list)
                     }
             
             output_queue.put(fov_id)
@@ -391,6 +392,12 @@ def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shu
             continue
         except Exception as e:
             logger.error(f"Unknown error in fluorescent spot detection {e}")
+            with fluorescent_lock:
+                shared_memory_fluorescent[fov_id] = {
+                    'spot_indices': [],
+                    'abnormal_spots': False,
+                    'spot_count': 0
+                }
             continue
 
 from utils import get_spot_images_from_fov
@@ -489,6 +496,12 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
             continue
         except Exception as e:
             logger.error(f"Unknown error in classification process {e}")
+            with classification_lock:
+                shared_memory_classification[fov_id] = {
+                    'cropped_images': [],
+                    'scores': [],
+                    'filtered_spots_count': 0
+                }
             continue
 
 from utils import numpy2png
