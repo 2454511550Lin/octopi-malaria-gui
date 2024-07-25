@@ -1,4 +1,4 @@
-def report(timing_data, fov_id):
+def report(timing_data, fov_id,logger):
     processes = list(timing_data.keys())
     max_end_time = max(timing_data[process]['end'] for process in processes)
     min_start_time = min(timing_data[process]['start'] for process in processes)
@@ -19,9 +19,7 @@ def report(timing_data, fov_id):
         # Create the progress bar
         progress_bar = ' ' * bar_start + '█' * bar_width + ' ' * (50 - bar_start - bar_width)
 
-        print(f"{process.ljust(max_name_length)} │ {duration:.3f}s │ {progress_bar} |")
+        logger.info(f"{process.ljust(max_name_length)} │ {duration:.3f}s │ {progress_bar} |")
 
-    print(f"\nTotal time: {total_duration:.3f}s")
-    print(f"{'=' * 50}")
-
-
+    logger.info(f"Total time: {total_duration:.3f}s")
+    logger.info(f"{'=' * 50}")

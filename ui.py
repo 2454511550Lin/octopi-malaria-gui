@@ -33,6 +33,7 @@ class ImageAnalysisUI(QMainWindow):
         super().__init__()
         self.start_event = start_event
         self.shared_config = shared_config
+        self.logger = self.shared_config.setup_process_logger()
         self.setWindowTitle("Octopi")
         self.setGeometry(100, 100, 1920, 1080)
         
@@ -470,9 +471,9 @@ class ImageAnalysisUI(QMainWindow):
             self.shared_config.set_channels_list(channels)
             self.channel_combo.addItems(channels)
         except ET.ParseError as e:
-            print(f"Error parsing XML: {e}")
+            self.logger.error(f"Error parsing XML: {e}")
         except FileNotFoundError:
-            print("channel_configurations.xml file not found")
+            self.logger.error("channel_configurations.xml file not found")
 
     def toggle_live_view(self):
         if self.shared_config.is_live_view_active.value:
@@ -670,7 +671,7 @@ class ImageAnalysisUI(QMainWindow):
             if row is not None:
                 self.fov_table.selectRow(row)
         else:
-            print(f"No FOV image available to display")
+            self.logger.error(f"No FOV image available to display")
 
     def show_previous_fov(self):
         current_row = self.fov_table.currentRow()
@@ -698,8 +699,6 @@ class ImageAnalysisUI(QMainWindow):
         if fov_id in self.fov_image_cache:
             self.current_fov_index = list(self.fov_image_cache.keys()).index(fov_id)
         else:
-            #print(f"FOV {fov_id} not in cache. It may need to be loaded.")
-            # load from the local disk
             try:
                 filename = f"{self.shared_config.get_path()}/{fov_id}_overlay.npy"
                 img_array = np.load(filename)
@@ -710,7 +709,7 @@ class ImageAnalysisUI(QMainWindow):
                     oldest_fov = next(iter(self.fov_image_cache))
                     del self.fov_image_cache[oldest_fov]
             except FileNotFoundError:
-                print(f"FOV {fov_id} not found on disk")
+                self.logger.error(f"FOV {fov_id} not found on disk")
                 return
 
         self.selected_fov_id = fov_id
@@ -770,7 +769,7 @@ class ImageAnalysisUI(QMainWindow):
         if not self.patient_id:
             QMessageBox.warning(self, "Input Error", "Please enter a Patient ID before starting the analysis.")
             return
-
+                        
         if not directory:
             QMessageBox.warning(self, "Input Error", "Please enter or select a directory for saving data.")
             return
@@ -786,8 +785,11 @@ class ImageAnalysisUI(QMainWindow):
         except OSError as e:
             QMessageBox.critical(self, "Error", f"Failed to create patient directory: {e}")
             return
-        
         self.shared_config.set_path(patient_directory)
+
+        self.shared_config.set_log_file(os.path.join(directory, f"{self.patient_id}"))
+        self.logger = self.shared_config.setup_process_logger()
+        self.logger.info(f"Starting analysis for patient {self.patient_id}")
         
         self.shared_config.save_raw_images.value = self.raw_images_check.isChecked()
         self.shared_config.save_overlay_images.value = self.overlay_images_check.isChecked()
@@ -810,7 +812,7 @@ class UIThread(QThread):
 
     def __init__(self, input_queue, output, shared_memory_final, shared_memory_classification, 
                  shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
-                 shared_memory_timing, final_lock, timing_lock, window):
+                 shared_memory_timing, final_lock, timing_lock, window,shared_config):
         super().__init__()
         self.input_queue = input_queue
         self.output = output    
@@ -824,6 +826,7 @@ class UIThread(QThread):
         self.timing_lock = timing_lock
         self.processed_fovs = set()
         self.window = window
+        self.logger = shared_config.setup_process_logger()
 
     def run(self):
         while True:
@@ -854,15 +857,11 @@ class UIThread(QThread):
         dpc_data = self.shared_memory_dpc.get(fov_id, {})
         dpc_image = dpc_data.get('dpc_image', np.array([]))
         fluorescent_image = acquisition_data.get('fluorescent', np.array([]))
-        
-        #print(f"Processing FOV {fov_id} to display")
-        #print(f"DPC image shape: {dpc_image.shape}, Fluorescent image shape: {fluorescent_image.shape}")
 
         if dpc_image.size > 0 and fluorescent_image.size > 0:
-            #print(f"Emitting update_fov_image signal for FOV {fov_id}")
             self.update_fov_image.emit(fov_id, dpc_image, fluorescent_image)
         else:
-            print(f"Missing DPC or fluorescent image for FOV {fov_id}")
+            self.logger.error(f"Missing DPC or fluorescent image for FOV {fov_id}")
 
         classification_data = self.shared_memory_classification.get(fov_id, {})
         images = classification_data.get('cropped_images', np.array([]))
@@ -871,7 +870,7 @@ class UIThread(QThread):
         if len(images) > 0 and len(scores) > 0:
             self.update_images.emit(fov_id, images, scores)
         else:
-            print(f"No images or scores for FOV {fov_id}")
+            self.logger.error(f"No images or scores for FOV {fov_id}")
         
         segmentation_data = self.shared_memory_segmentation.get(fov_id, {})
         rbc_count = segmentation_data.get('n_cells', 0)
@@ -917,7 +916,7 @@ def ui_process(input_queue, output, shared_memory_final, shared_memory_classific
     
     ui_thread = UIThread(input_queue, output, shared_memory_final, shared_memory_classification, 
                          shared_memory_segmentation, shared_memory_acquisition, shared_memory_dpc, 
-                         shared_memory_timing, final_lock, timing_lock, window)
+                         shared_memory_timing, final_lock, timing_lock, window,shared_config)
     ui_thread.update_fov.connect(window.update_fov_list)
     ui_thread.update_images.connect(window.update_cropped_images)
     ui_thread.update_rbc.connect(window.update_rbc_count)

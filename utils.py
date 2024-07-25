@@ -10,6 +10,9 @@ from skimage.feature.blob import _prune_blobs
 import numpy as np
 from scipy import signal
 import pandas as pd
+import logging
+from logging.handlers import RotatingFileHandler
+import os, sys
 
 
 def imread_gcsfs(fs,file_path):
@@ -363,6 +366,7 @@ def save_dpc_image(img,filename):
 settings = {'spot_detection_downsize_factor': 4, 'spot_detection_threshold': 10}
 
 import torch.multiprocessing as mp
+from log import setup_logger
 class SharedConfig:
     def __init__(self):
         self.manager = mp.Manager()
@@ -388,6 +392,11 @@ class SharedConfig:
         self.position_lock = self.manager.Lock()
         self.to_loading = self.manager.Value('b', False)  # 'b' for boolean
         self.to_scanning = self.manager.Value('b', False)  # 'b' for boolean
+
+        self.log_file = self.manager.Value('s', './')  # Shared string for log file path
+
+    def set_log_file(self, log_file):
+        self.log_file.value = log_file
 
     def set_path(self, new_path):
         self.path.value = new_path
@@ -432,3 +441,44 @@ class SharedConfig:
 
     def set_channel_selected(self, channel_idx):
         self.live_channel_selected.value = channel_idx
+
+    def setup_process_logger(self):
+        logger = logging.getLogger(f"{__name__}_{mp.current_process().name}")
+        logger.setLevel(logging.INFO)
+
+        # Remove all existing handlers
+        for handler in logger.handlers[:]:
+            handler.close()
+            logger.removeHandler(handler)
+
+        # Get the log file path from the shared config
+        log_file_path = os.path.join(self.log_file.value, "log.txt")
+
+        # Create a RotatingFileHandler with 'a' mode for appending
+        file_handler = RotatingFileHandler(log_file_path, mode='a', maxBytes=10*1024*1024, backupCount=5)
+        file_handler.setLevel(logging.INFO)
+
+        # Create a formatter and add it to the handler
+        formatter = logging.Formatter('%(asctime)s - %(processName)s - %(name)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+
+        # Add the handler to the logger
+        logger.addHandler(file_handler)
+
+        # Redirect stdout and stderr to the logger
+        sys.stdout = StreamToLogger(logger, logging.INFO)
+        sys.stderr = StreamToLogger(logger, logging.ERROR)
+
+        return logger
+        
+        
+class StreamToLogger(object):
+    def __init__(self, logger, log_level=logging.INFO):
+        self.logger = logger
+        self.log_level = log_level
+        self.linebuf = ''
+    def write(self, buf):
+        for line in buf.rstrip().splitlines():
+            self.logger.log(self.log_level, line.rstrip())
+    def flush(self):
+        pass

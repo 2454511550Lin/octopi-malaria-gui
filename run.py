@@ -8,9 +8,11 @@ import time
 
 from simulation import get_image
 import threading
-from log import report
+from log import report, setup_logger
 
 from utils import SharedConfig, numpy2png
+
+import os
 
 # Existing shared memory managers
 manager = mp.Manager()
@@ -39,7 +41,6 @@ timeout = 0.1
 shared_config = SharedConfig()
 shared_config.set_path('data')
 
-
 INIT_FOCUS_RANGE_START_MM = 6.2
 INIT_FOCUS_RANGE_END_MM = 6.7
 SCAN_FOCUS_SEARCH_RANGE_MM = 0.1
@@ -48,7 +49,7 @@ SAVE_NPY = True
 
 def log_time(fov_id: str, process_name: str, event: str):
     with timing_lock:
-        #print(f"Logging time for FOV {fov_id} in {process_name} at {event}")
+        #main_logger.info(f"Logging time for FOV {fov_id} in {process_name} at {event}")
 
         if shared_memory_timing['START'] is None:
             shared_memory_timing['START'] = time.time()
@@ -77,11 +78,12 @@ def image_acquisition_simulation(dpc_queue: mp.Queue, fluorescent_queue: mp.Queu
     BEGIN = time.time()
     while not shutdown_event.is_set():
 
-        #print("Check start event: ", start_event.is_set())
         if not start_event.is_set():
             time.sleep(1)
             continue     
-        # construct the iterator
+        
+        logger = shared_config.setup_process_logger()
+
         try:
             fov_id = next(image_iterator)
             log_time(fov_id, "Image Acquisition", "start")
@@ -108,10 +110,10 @@ def image_acquisition_simulation(dpc_queue: mp.Queue, fluorescent_queue: mp.Queu
             log_time(fov_id, "Image Acquisition", "end")
         
         except StopIteration:
-            print("No more images to process")
+            logger.info("No more images to process")
             break
         
-        #print(f"Image Acquisition: Processed FOV {fov_id}")
+        #logger.info(f"Image Acquisition: Processed FOV {fov_id}")
         time.sleep(1) 
 
         counter += 1
@@ -140,17 +142,17 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
         if not start_event.is_set():
             with shared_config.position_lock:
                 if shared_config.to_scanning.value and not shared_config.to_loading.value:
-                    print("Moving to scanning position")
+                    #main_logger.info("Moving to scanning position")
                     microscope.to_scanning_position()
                     shared_config.reset_to_scanning()
                     continue
                 if shared_config.to_loading.value and not shared_config.to_scanning.value:
-                    print("Moving to loading position")
+                    #main_logger.info("Moving to loading position")
                     microscope.to_loading_position()
                     shared_config.reset_to_loading()
                     continue
 
-            #print("Check the live view active vlaue: ", shared_config.is_live_view_active.value)
+            #main_logger.info("Check the live view active vlaue: ", shared_config.is_live_view_active.value)
             
             if shared_config.is_live_view_active.value:
 
@@ -161,13 +163,15 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
 
                 image = microscope.acquire_image()
 
-                #print("Live view image shape: ", image.shape)
+                #main_logger.info("Live view image shape: ", image.shape)
                 
                 shared_config.set_live_view_image(crop_image(image))
             
             time.sleep(1/shared_config.frame_rate.value)
             
             continue
+        
+        logger = shared_config.setup_process_logger()
 
         try:
             # do auto focus
@@ -202,7 +206,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                     z_focus = microscope.run_autofocus(step_size_mm = [0.01, 0.0015], start_z_mm = offset_z_mm - SCAN_FOCUS_SEARCH_RANGE_MM/2, end_z_mm = offset_z_mm + SCAN_FOCUS_SEARCH_RANGE_MM/2)
                     focus_map.append((xi, yi, z_focus))
                     offset_z_mm = z_focus
-            print("Focus map: ",focus_map)
+            logger.info("Focus map: ",focus_map)
             z_map = interpolate_focus(scan_grid, focus_map)
 
             # scan using focus map
@@ -238,8 +242,6 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                 else:
                     fluorescent = np.stack([fluorescent,fluorescent,fluorescent],axis=2)
 
-                print (left_half.shape, right_half.shape, fluorescent.shape)
-
                 shared_memory_acquisition[fov_id] = {
                     'left_half': crop_image(left_half),
                     'right_half': crop_image(right_half),
@@ -251,7 +253,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
 
                 log_time(fov_id, "Image Acquisition", "end")
         except Exception as e:
-            print(f"Error in image acquisition: {e}")
+            logger.error(f"Error in image acquisition: {e}")
 
         while start_event.is_set() and not shutdown_event.is_set():
             time.sleep(1)
@@ -277,7 +279,7 @@ def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp
             try:
                 assert dpc_image.shape == (2800, 2800)
             except AssertionError:
-                print(f"FOV {fov_id} DPC image shape is {dpc_image.shape} but not (2800, 2800)")
+                main_logger.info(f"FOV {fov_id} DPC image shape is {dpc_image.shape} but not (2800, 2800)")
             
             with dpc_lock:
                 shared_memory_dpc[fov_id] = {'dpc_image': dpc_image}
@@ -345,6 +347,7 @@ def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shu
     
     while not shutdown_event.is_set():
         start_event.wait()
+        logger = shared_config.setup_process_logger()
         try:
             fov_id = input_queue.get(timeout=timeout)
             log_time(fov_id, "Fluorescent Spot Detection", "start")
@@ -356,9 +359,9 @@ def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shu
             spot_list = detect_spots(resize_image_cp(I_fluorescence_bg_removed,
                                                      downsize_factor=settings['spot_detection_downsize_factor']),
                                                      thresh=settings['spot_detection_threshold'])
-            #print(f"FOV {fov_id} detected {len(spot_list)} spots")
+            #main_logger.info(f"FOV {fov_id} detected {len(spot_list)} spots")
             if len(spot_list) > MAX_SPOTS_THRESHOLD:
-                print(f"Abnormal number of fluorescent spots detected in FOV {fov_id}: {len(spot_list)}")
+                logger.info(f"Abnormal number of fluorescent spots detected in FOV {fov_id}: {len(spot_list)}")
                 spot_list = []  
   
             else:
@@ -404,6 +407,7 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
 
     while not shutdown_event.is_set():
         start_event.wait()
+        logger = shared_config.setup_process_logger()
         try:
             # Check segmentation queue
             try:
@@ -472,15 +476,13 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                 log_time(fov_id, "Classification Process", "end")
 
         except Exception as e:
-            print(f"Error in classification process: {e}")
+            logger.error(f"Error in classification process: {e}")
             continue
 
 from utils import numpy2png
 import os
 
 def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
-    
-    
     
     while not shutdown_event.is_set():
 
@@ -535,6 +537,7 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
 def cleanup_process(cleanup_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
     while not shutdown_event.is_set():
         start_event.wait()
+        
         try:
             fov_id = cleanup_queue.get(timeout=timeout)
             
@@ -542,20 +545,28 @@ def cleanup_process(cleanup_queue: mp.Queue,shutdown_event: mp.Event,start_event
             with final_lock, timing_lock:
 
                 # Calculate processing times and generate visualization
-                timing_data = shared_memory_timing[fov_id]
-                
-                print(f"\n{'=' * 50}")
-                print(f"Report for FOV {fov_id}:")
-                print(f"RBC counts: {shared_memory_segmentation[fov_id]['n_cells']}, spots: {len(shared_memory_fluorescent[fov_id]['spot_indices'])},filtered spots: {shared_memory_classification[fov_id]['filtered_spots_count']}")
-                print(f"{'=' * 50}")
-                report(timing_data, fov_id)
-                #print(f"Average time for one FOV: {(shared_memory_timing['END'] - shared_memory_timing['START'])/(len(shared_memory_timing)-2)}")
+                timing_data = shared_memory_timing.get(fov_id, {})
 
-                for shared_memory in [shared_memory_acquisition, shared_memory_dpc, shared_memory_segmentation, shared_memory_fluorescent, 
-                                      shared_memory_classification, shared_memory_final, shared_memory_timing]:
+                logger = shared_config.setup_process_logger()
+                logger.info(f"\n{'=' * 50}")
+                logger.info(f"Report for FOV {fov_id}:")
+                logger.info(f"RBC counts: {shared_memory_segmentation[fov_id]['n_cells']}, spots: {len(shared_memory_fluorescent[fov_id]['spot_indices'])},filtered spots: {shared_memory_classification[fov_id]['filtered_spots_count']}")
+                logger.info(f"{'=' * 50}")
+                report(timing_data, fov_id, logger)
+
+                shared_memories = [shared_memory_acquisition, shared_memory_dpc, shared_memory_segmentation, 
+                                   shared_memory_fluorescent, shared_memory_classification, shared_memory_final, 
+                                   shared_memory_timing]
+                
+                for shared_memory in shared_memories:
                     if fov_id in shared_memory:
                         del shared_memory[fov_id]
-            print(f"FOV {fov_id} memory is freed up")
+                
+                # Confirm deletion
+                if all(fov_id not in shared_memory for shared_memory in shared_memories):
+                    logger.info(f"FOV {fov_id} memory has been successfully freed up")
+                else:
+                    logger.error(f"Warning: FOV {fov_id} may not have been completely removed from all shared memories")
         except Empty:
             continue
 
@@ -574,7 +585,6 @@ if __name__ == "__main__":
 
     # Create an event to signal shutdown
     shutdown_event = mp.Event()
-
     # Create an event to signal start
     start_event = mp.Event()
 
@@ -594,10 +604,6 @@ if __name__ == "__main__":
 
     ui_process.start()
 
-
-    #start_event.wait()
-
-
     for p in processes:
         p.start()
 
@@ -609,26 +615,33 @@ if __name__ == "__main__":
     classification_thread.start()
     segmentation_thread.start()
 
+    #logger = shared_config.setup_process_logger()
+
     try:
         while not shutdown_event.is_set():
             time.sleep(1)    
     except KeyboardInterrupt:
+        #logger.info("Stopping all processes...")
         print("Stopping all processes...")
     finally:
         shutdown_event.set()
         for p in processes:
             p.join(timeout=0.1)  # Give processes more time to shut down
             if p.is_alive():
+                #logger.info(f"Force terminating process {p.name}")
                 print(f"Force terminating process {p.name}")
                 p.terminate()
         classification_thread.join(timeout=0.1)
         segmentation_thread.join(timeout=0.1)
         ui_process.join(timeout=0.1)
         if ui_process.is_alive():
+            #logger.info("Force terminating UI process")
             print("Force terminating UI process")
             ui_process.terminate()
+        #logger.info("All processes have been shut down.")
         print("All processes have been shut down.")
         if classification_thread.is_alive() or segmentation_thread.is_alive():
+            #logger.info("Force terminating classification and segmentation threads")
             print("Force terminating classification and segmentation threads")
             import os
             os._exit(0)
