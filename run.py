@@ -117,7 +117,7 @@ def image_acquisition_simulation(dpc_queue: mp.Queue, fluorescent_queue: mp.Queu
         time.sleep(1) 
 
         counter += 1
-        if counter == 10:
+        if counter == 50:
             counter = 0
             while start_event.is_set() and not shutdown_event.is_set():
                 time.sleep(1)
@@ -350,7 +350,7 @@ def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_
             continue
 
 from utils import remove_background, resize_image_cp, detect_spots, prune_blobs, settings, seg_spot_filter_one_fov
-MAX_SPOTS_THRESHOLD = 8000  # Maximum number of spots allowed
+MAX_SPOTS_THRESHOLD = 5000  # Maximum number of spots allowed
 
 def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
     
