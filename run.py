@@ -206,7 +206,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                     z_focus = microscope.run_autofocus(step_size_mm = [0.01, 0.0015], start_z_mm = offset_z_mm - SCAN_FOCUS_SEARCH_RANGE_MM/2, end_z_mm = offset_z_mm + SCAN_FOCUS_SEARCH_RANGE_MM/2)
                     focus_map.append((xi, yi, z_focus))
                     offset_z_mm = z_focus
-            logger.info("Focus map: ",focus_map)
+            #logger.info("Focus map: ",focus_map)
             z_map = interpolate_focus(scan_grid, focus_map)
 
             # scan using focus map
