@@ -242,11 +242,34 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                 else:
                     fluorescent = np.stack([fluorescent,fluorescent,fluorescent],axis=2)
 
+                left_half = crop_image(left_half)
+                right_half = crop_image(right_half)
+                fluorescent = crop_image(fluorescent)
+
                 shared_memory_acquisition[fov_id] = {
-                    'left_half': crop_image(left_half),
-                    'right_half': crop_image(right_half),
-                    'fluorescent': crop_image(fluorescent)
+                    'left_half': left_half,
+                    'right_half': right_half,
+                    'fluorescent': fluorescent
                 }
+
+                with final_lock:
+                    if shared_config.save_raw_images.value:
+                        save_path = shared_config.get_path()
+                        if SAVE_NPY:
+                            left_filename = f"{fov_id}_left_half.npy"
+                            right_filename = f"{fov_id}_right_half.npy"
+                            fluorescent_filename = f"{fov_id}_fluorescent.npy"
+                            np.save(os.path.join(save_path, left_filename), left_half)
+                            np.save(os.path.join(save_path, right_filename), right_half)
+                            np.save(os.path.join(save_path, fluorescent_filename), fluorescent)
+                    else:
+                        # save the png
+                        left_filename = f"{fov_id}_left_half"
+                        right_filename = f"{fov_id}_right_half"
+                        fluorescent_filename = f"{fov_id}_fluorescent"
+                        save_dpc_image(left_half, os.path.join(save_path, left_filename))
+                        save_dpc_image(right_half, os.path.join(save_path, right_filename)) 
+                        save_dpc_image(fluorescent, os.path.join(save_path, fluorescent_filename))
 
                 dpc_queue.put(fov_id)
                 fluorescent_queue.put(fov_id)
@@ -281,22 +304,7 @@ def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp
             
             
             with dpc_lock:
-                shared_memory_dpc[fov_id] = {'dpc_image': dpc_image}
-
-            with final_lock:
-                if shared_config.save_raw_images.value:
-                    save_path = shared_config.get_path()
-                    if SAVE_NPY:
-                        left_filename = f"{fov_id}_left_half.npy"
-                        right_filename = f"{fov_id}_right_half.npy"
-                        np.save(os.path.join(save_path, left_filename), left_half)
-                        np.save(os.path.join(save_path, right_filename), right_half)
-                    else:
-                        # save the png
-                        left_filename = f"{fov_id}_left_half"
-                        right_filename = f"{fov_id}_right_half"
-                        save_dpc_image(left_half, os.path.join(save_path, left_filename))
-                        save_dpc_image(right_half, os.path.join(save_path, right_filename))         
+                shared_memory_dpc[fov_id] = {'dpc_image': dpc_image}        
             
             output_queue.put(fov_id)
             log_time(fov_id, "DPC Process", "end")
