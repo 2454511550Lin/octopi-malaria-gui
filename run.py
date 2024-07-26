@@ -285,15 +285,15 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                             np.save(os.path.join(save_path, left_filename), left_half)
                             np.save(os.path.join(save_path, right_filename), right_half)
                             np.save(os.path.join(save_path, fluorescent_filename), fluorescent)
-                    else:
+                        else:
                         # save the bmp
-                        left_filename = f"{fov_id}_left_half.bmp"
-                        right_filename = f"{fov_id}_right_half.bmp"
-                        fluorescent_filename = f"{fov_id}_fluorescent.bmp"
-                        cv2.imwrite(os.path.join(save_path, left_filename), left_half,cv2.IMREAD_GRAYSCALE)
-                        cv2.imwrite(os.path.join(save_path, right_filename), right_half,cv2.IMREAD_GRAYSCALE)
-                        cv2.imwrite(os.path.join(save_path, fluorescent_filename), fluorescent)
-
+                            left_filename = f"{fov_id}_left_half.bmp"
+                            right_filename = f"{fov_id}_right_half.bmp"
+                            fluorescent_filename = f"{fov_id}_fluorescent.bmp"
+                            cv2.imwrite(os.path.join(save_path, left_filename), left_half)
+                            cv2.imwrite(os.path.join(save_path, right_filename), right_half)
+                            cv2.imwrite(os.path.join(save_path, fluorescent_filename), fluorescent)
+    
                 dpc_queue.put(fov_id)
                 fluorescent_queue.put(fov_id)
 
