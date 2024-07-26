@@ -408,6 +408,8 @@ class SharedConfig:
 
         self.log_file = self.manager.Value('s', './')  # Shared string for log file path
 
+        self.SAVE_NPY = self.manager.Value('b', False)
+
     def set_log_file(self, log_file):
         self.log_file.value = log_file
 

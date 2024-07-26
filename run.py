@@ -45,7 +45,7 @@ INIT_FOCUS_RANGE_START_MM = 6.2
 INIT_FOCUS_RANGE_END_MM = 6.7
 SCAN_FOCUS_SEARCH_RANGE_MM = 0.1
 
-SAVE_NPY = True
+import cv2
 
 def log_time(fov_id: str, process_name: str, event: str):
     with timing_lock:
@@ -97,12 +97,35 @@ def image_acquisition_simulation(dpc_queue: mp.Queue, fluorescent_queue: mp.Queu
                 left_half = left_half[:,:,0]
             if right_half.shape[2] == 3:
                 right_half = right_half[:,:,0]
+
+            left_half = crop_image(left_half)
+            right_half = crop_image(right_half)
+            fluorescent = crop_image(fluorescent)
     
             shared_memory_acquisition[fov_id] = {
-                'left_half': crop_image(left_half),
-                'right_half': crop_image(right_half),
-                'fluorescent': crop_image(fluorescent)
+                'left_half': left_half,
+                'right_half': right_half,
+                'fluorescent': fluorescent
             }
+
+            with final_lock:
+                if shared_config.save_raw_images.value:
+                    save_path = shared_config.get_path()
+                    if shared_config.SAVE_NPY.value:
+                        left_filename = f"{fov_id}_left_half.npy"
+                        right_filename = f"{fov_id}_right_half.npy"
+                        fluorescent_filename = f"{fov_id}_fluorescent.npy"
+                        np.save(os.path.join(save_path, left_filename), left_half)
+                        np.save(os.path.join(save_path, right_filename), right_half)
+                        np.save(os.path.join(save_path, fluorescent_filename), fluorescent)
+                    else:
+                    # save the bmp
+                        left_filename = f"{fov_id}_left_half.bmp"
+                        right_filename = f"{fov_id}_right_half.bmp"
+                        fluorescent_filename = f"{fov_id}_fluorescent.bmp"
+                        cv2.imwrite(os.path.join(save_path, left_filename), left_half)
+                        cv2.imwrite(os.path.join(save_path, right_filename), right_half)
+                        cv2.imwrite(os.path.join(save_path, fluorescent_filename), fluorescent)
 
             dpc_queue.put(fov_id)
             fluorescent_queue.put(fov_id)
@@ -255,7 +278,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                 with final_lock:
                     if shared_config.save_raw_images.value:
                         save_path = shared_config.get_path()
-                        if SAVE_NPY:
+                        if shared_config.SAVE_NPY.value:
                             left_filename = f"{fov_id}_left_half.npy"
                             right_filename = f"{fov_id}_right_half.npy"
                             fluorescent_filename = f"{fov_id}_fluorescent.npy"
@@ -263,13 +286,13 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                             np.save(os.path.join(save_path, right_filename), right_half)
                             np.save(os.path.join(save_path, fluorescent_filename), fluorescent)
                     else:
-                        # save the png
-                        left_filename = f"{fov_id}_left_half"
-                        right_filename = f"{fov_id}_right_half"
-                        fluorescent_filename = f"{fov_id}_fluorescent"
-                        save_dpc_image(left_half, os.path.join(save_path, left_filename))
-                        save_dpc_image(right_half, os.path.join(save_path, right_filename)) 
-                        save_dpc_image(fluorescent, os.path.join(save_path, fluorescent_filename))
+                        # save the bmp
+                        left_filename = f"{fov_id}_left_half.bmp"
+                        right_filename = f"{fov_id}_right_half.bmp"
+                        fluorescent_filename = f"{fov_id}_fluorescent.bmp"
+                        cv2.imwrite(os.path.join(save_path, left_filename), left_half,cv2.IMREAD_GRAYSCALE)
+                        cv2.imwrite(os.path.join(save_path, right_filename), right_half,cv2.IMREAD_GRAYSCALE)
+                        cv2.imwrite(os.path.join(save_path, fluorescent_filename), fluorescent)
 
                 dpc_queue.put(fov_id)
                 fluorescent_queue.put(fov_id)
@@ -540,28 +563,26 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
                     cropped_images = (shared_memory_classification[fov_id]['cropped_images']*255).astype(np.uint8)
                     scores = shared_memory_classification[fov_id]['scores']
                     
-                    SAVE_NUMPYARRAY = True
                     save_path = shared_config.get_path()
-                    if not SAVE_NUMPYARRAY: 
-                        for i, cropped_image in enumerate(cropped_images):
-                            filename = os.path.join(save_path, f"{fov_id}_{i}.png")
-                            numpy2png(cropped_image,filename)
-                            #dpc_image = shared_memory_dpc[fov_id]['dpc_image']*255
-                            #save_dpc_image(dpc_image, f'data/{fov_id}.png')
-                    else:
-                        if shared_config.save_spot_images.value:
-                            filename = os.path.join(save_path, f"{fov_id}.npy")
-                            np.save(filename, cropped_images)
-                            filename = os.path.join(save_path, f"{fov_id}_scores.npy")
-                            np.save(filename, scores)
-                        if shared_config.save_overlay_images.value:
-                            filename = os.path.join(save_path, f"{fov_id}_overlay.npy")
-                            fluorescent_image = shared_memory_acquisition[fov_id]['fluorescent']
-                            dpc_image = shared_memory_dpc[fov_id]['dpc_image']
-                            fluorescent_image_int8 = fluorescent_image.astype(np.uint8)
-                            dpc_image_int8 = (dpc_image*255).astype(np.uint8)
-                            img = np.stack([fluorescent_image_int8[:,:,0], fluorescent_image_int8[:,:,1], fluorescent_image_int8[:,:,2], dpc_image_int8], axis=0)
-                            np.save(filename, img)
+                    
+                    if shared_config.save_spot_images.value:
+                        filename = os.path.join(save_path, f"{fov_id}.npy")
+                        np.save(filename, cropped_images)
+                        filename = os.path.join(save_path, f"{fov_id}_scores.npy")
+                        np.save(filename, scores)
+                    if shared_config.save_overlay_images.value:
+                        #filename = os.path.join(save_path, f"{fov_id}_overlay.npy")
+                        #fluorescent_image = shared_memory_acquisition[fov_id]['fluorescent']
+                        filename = os.path.join(save_path, f"{fov_id}_dpc.npy")
+                        dpc_image = shared_memory_dpc[fov_id]['dpc_image']
+                        #fluorescent_image_int8 = fluorescent_image.astype(np.uint8)
+                        dpc_image_int8 = (dpc_image*255).astype(np.uint8)
+                        #img = np.stack([fluorescent_image_int8[:,:,0], fluorescent_image_int8[:,:,1], fluorescent_image_int8[:,:,2], dpc_image_int8], axis=0)
+                        if shared_config.SAVE_NPY.value:
+                            np.save(filename, dpc_image_int8)
+                        else:
+                            filename = os.path.join(save_path, f"{fov_id}_dpc.bmp")
+                            cv2.imwrite(filename, dpc_image_int8)
 
                     temp_dict = shared_memory_final[fov_id]
                     temp_dict['saved'] = True
