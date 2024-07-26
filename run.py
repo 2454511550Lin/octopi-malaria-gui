@@ -670,14 +670,14 @@ if __name__ == "__main__":
             if p.name == "Image Acquisition":
                 p.join(timeout=2)  # Give image acquisition process more time to shut down
             else:
-                p.join(timeout=0.1)  # Give other processes more time to shut down
+                p.join(timeout=1)  # Give other processes more time to shut down
             if p.is_alive():
                 #logger.info(f"Force terminating process {p.name}")
                 print(f"Force terminating process {p.name}")
                 p.terminate()
-        classification_thread.join(timeout=0.1)
-        segmentation_thread.join(timeout=0.1)
-        ui_process.join(timeout=0.1)
+        classification_thread.join(timeout=1)
+        segmentation_thread.join(timeout=1)
+        ui_process.join(timeout=1)
         if ui_process.is_alive():
             #logger.info("Force terminating UI process")
             print("Force terminating UI process")
