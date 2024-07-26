@@ -22,17 +22,31 @@ def imread_gcsfs(fs,file_path):
 
 def resize_cp(ar,downsize_factor=4):
 	# by Rinni
-	s_ar = cp.zeros((int(ar.shape[0]/downsize_factor), int(ar.shape[0]/downsize_factor), 3))
-	s_ar[:,:,0] = ar[:,:,0].reshape([int(ar.shape[0]/downsize_factor), int(downsize_factor), int(ar.shape[1]/downsize_factor), int(downsize_factor)]).mean(3).mean(1)
-	s_ar[:,:,1] = ar[:,:,1].reshape([int(ar.shape[0]/downsize_factor), int(downsize_factor), int(ar.shape[1]/downsize_factor), int(downsize_factor)]).mean(3).mean(1)
-	s_ar[:,:,2] = ar[:,:,2].reshape([int(ar.shape[0]/downsize_factor), int(downsize_factor), int(ar.shape[1]/downsize_factor), int(downsize_factor)]).mean(3).mean(1)
-	return s_ar
+    if not cp.is_available():
+        raise Exception("No GPU device found")
+    device_id = cp.cuda.Device()
+    with cp.cuda.Device(device_id):
+        s_ar = cp.zeros((int(ar.shape[0]/downsize_factor), int(ar.shape[0]/downsize_factor), 3))
+        s_ar[:,:,0] = ar[:,:,0].reshape([int(ar.shape[0]/downsize_factor), int(downsize_factor), int(ar.shape[1]/downsize_factor), int(downsize_factor)]).mean(3).mean(1)
+        s_ar[:,:,1] = ar[:,:,1].reshape([int(ar.shape[0]/downsize_factor), int(downsize_factor), int(ar.shape[1]/downsize_factor), int(downsize_factor)]).mean(3).mean(1)
+        s_ar[:,:,2] = ar[:,:,2].reshape([int(ar.shape[0]/downsize_factor), int(downsize_factor), int(ar.shape[1]/downsize_factor), int(downsize_factor)]).mean(3).mean(1)
+    
+    return s_ar
 
 def resize_image_cp(I,downsize_factor=4):
-	I = I.astype('float')
-	I_resized = cp.copy(I)
-	I_resized = resize_cp(I_resized, downsize_factor)
-	return(I_resized)
+     # check if I is numpy array
+    if not cp.is_available():
+        raise Exception("No GPU device found")
+    device_id = cp.cuda.Device()
+    with cp.cuda.Device(device_id):
+        if isinstance(I, np.ndarray):
+            I = cp.asarray(I)   
+            I = I.astype('float16')
+        #I_resized = cp.copy(I)
+        I_resized = resize_cp(I, downsize_factor)
+
+        cp.get_default_memory_pool().free_all_blocks()
+    return I_resized
 
 def remove_background(img_cpu, return_gpu_image=True):
     # check if the cp device is available
@@ -465,8 +479,8 @@ class SharedConfig:
         logger.addHandler(file_handler)
 
         # Redirect stdout and stderr to the logger
-        sys.stdout = StreamToLogger(logger, logging.INFO)
-        sys.stderr = StreamToLogger(logger, logging.ERROR)
+        #sys.stdout = StreamToLogger(logger, logging.INFO)
+        #sys.stderr = StreamToLogger(logger, logging.ERROR)
 
         return logger
         
