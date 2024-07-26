@@ -19,13 +19,13 @@ def get_fov_id(path):
     unique_fov_ids = list(set(fov_id))
     
     # Calculate how many times we need to repeat the FOVs to reach 50
-    repeat_count = (50 + len(unique_fov_ids) - 1) // len(unique_fov_ids)
+    repeat_count = (500 + len(unique_fov_ids) - 1) // len(unique_fov_ids)
     
     # Repeat the FOV IDs to reach at least 50
     extended_fov_ids = unique_fov_ids * repeat_count
     
     # Trim to exactly 50 FOVs if we've exceeded
-    extended_fov_ids = extended_fov_ids[:50]
+    extended_fov_ids = extended_fov_ids[:500]
     
     return extended_fov_ids
 
