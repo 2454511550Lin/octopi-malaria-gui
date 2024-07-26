@@ -283,6 +283,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
             time.sleep(1)
 
     microscope.close()
+    print("Image acquisition process finished")
 
 from utils import generate_dpc,save_dpc_image
 
@@ -302,7 +303,6 @@ def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp
 
             assert dpc_image.shape == (2800, 2800)
             
-            
             with dpc_lock:
                 shared_memory_dpc[fov_id] = {'dpc_image': dpc_image}        
             
@@ -315,6 +315,7 @@ def dpc_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp
             logger.error(f"Unknown error in DPC process {e}")
             continue
 
+    print("DPC process finished")
 
 def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
     from interactive_m2unet_inference import M2UnetInteractiveModel as m2u
@@ -371,12 +372,12 @@ def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shu
             
             fluorescent = shared_memory_acquisition[fov_id]['fluorescent']
 
-            I_fluorescence_bg_removed = remove_background(fluorescent,return_gpu_image=True)
+            I_fluorescence_bg_removed = remove_background(fluorescent,return_gpu_image=False)
 
             spot_list = detect_spots(resize_image_cp(I_fluorescence_bg_removed,
                                                      downsize_factor=settings['spot_detection_downsize_factor']),
-                                                     thresh=settings['spot_detection_threshold'])
-            #main_logger.info(f"FOV {fov_id} detected {len(spot_list)} spots")
+                                                     thresh=settings['spot_detection_threshold'])      
+            
             if len(spot_list) > MAX_SPOTS_THRESHOLD:
                 logger.info(f"Abnormal number of fluorescent spots detected in FOV {fov_id}: {len(spot_list)}")
                 spot_list = spot_list[:MAX_SPOTS_THRESHOLD]
@@ -392,6 +393,9 @@ def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shu
                         'abnormal_spots': len(spot_list) > MAX_SPOTS_THRESHOLD,
                         'spot_count': len(spot_list)
                     }
+
+            # free the memory
+            del I_fluorescence_bg_removed
             
             output_queue.put(fov_id)
             log_time(fov_id, "Fluorescent Spot Detection", "end")
@@ -407,6 +411,8 @@ def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shu
                     'spot_count': 0
                 }
             continue
+    
+    print("Fluorescent spot detection process finished")
 
 from utils import get_spot_images_from_fov
 from model import ResNet, run_model    
@@ -456,7 +462,6 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                 segmentation_map = shared_memory_segmentation[fov_id]['segmentation_map']
                 spot_list = shared_memory_fluorescent[fov_id]['spot_indices']
 
-
                 if len(spot_list) > 0:
 
                     filtered_spots = seg_spot_filter_one_fov(segmentation_map, spot_list)
@@ -467,8 +472,8 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                     cropped_images = get_spot_images_from_fov(fluorescence_image,dpc_image,filtered_spots,r=15)
                     cropped_images = cropped_images.transpose(0, 3, 1, 2)
 
-                    scores1 = run_model(model1,DEVICE,cropped_images,4096)[:,1]
-                    scores2 = run_model(model2,DEVICE,cropped_images,4096)[:,1]
+                    scores1 = run_model(model1,DEVICE,cropped_images,1024)[:,1]
+                    scores2 = run_model(model2,DEVICE,cropped_images,1024)[:,1]
 
                     # use whichever smaller as the final score
                     scores = np.minimum(scores1,scores2)
@@ -484,6 +489,8 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                         'scores': scores,
                         'filtered_spots_count': len(filtered_spots)
                     }
+
+                #del cropped_images, scores
                 
                 # Update shared_memory_final
                 with final_lock:
@@ -511,6 +518,8 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                     'filtered_spots_count': 0
                 }
             continue
+    print("Classification process finished")
+
 
 from utils import numpy2png
 import os
@@ -569,6 +578,8 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
             logger = shared_config.setup_process_logger()
             logger.error(f"Unknown error in saving process {e}")
             continue
+
+    print("Saving process finished")
         
 
 def cleanup_process(cleanup_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
@@ -610,6 +621,8 @@ def cleanup_process(cleanup_queue: mp.Queue,shutdown_event: mp.Event,start_event
             logger = shared_config.setup_process_logger()
             logger.error(f"Unknown error in cleanup process {e}")
             continue
+
+    print("Cleanup process finished")
 
 from ui import ui_process
 
