@@ -77,12 +77,32 @@ class VirtualImageListWidget(QWidget):
         self.list_view.setSpacing(10)
         self.layout.addWidget(self.list_view)
 
+        self.fov_data = {}  # New: Store data for each FOV
+
     def clear(self):
         self.model.clear()
+        self.fov_data.clear()
 
     def update_images(self, images, fov_id):
+        # Remove existing images for this FOV
+        if fov_id in self.fov_data:
+            for index in reversed(self.fov_data[fov_id]):
+                self.model.removeRow(index)
+
+        # Add new images
+        new_indices = []
         for image, score in images:
+            index = self.model.rowCount()
             self.model.addItem(image, score, fov_id)
+            new_indices.append(index)
+
+        # Update stored indices for this FOV
+        self.fov_data[fov_id] = new_indices
+    def removeRow(self, row):
+        self.beginRemoveRows(QModelIndex(), row, row)
+        del self.items[row]
+        self.endRemoveRows()
+        return True
 
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton
 from PyQt5.QtCore import Qt

@@ -341,7 +341,6 @@ class ImageAnalysisUI(QMainWindow):
         self.tab_widget.addTab(self.cropped_tab, "Malaria Detection Report")
 
         # A tab for live view
-        # A tab for live view
         live_view_tab = QWidget()
         live_view_layout = QHBoxLayout(live_view_tab)  # Changed to QHBoxLayout
 
@@ -613,7 +612,9 @@ class ImageAnalysisUI(QMainWindow):
             self.update_malaria_positives(fov_id, malaria_positives)
             self.fov_image_data[fov_id] = updated_images
 
-        self.update_all_fov_images()
+        # Update only the changed FOV
+        self.virtual_image_list.update_images(updated_images, fov_id)
+        self.update_stats()
 
         if fov_id == self.selected_fov_id and self.positive_images_widget.image_list.isVisible():
             self.update_positive_images(fov_id)
