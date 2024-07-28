@@ -133,6 +133,7 @@ min_sigma = 1
 max_sigma = 2.5
 scale = np.linspace(0, 1, num_sigma)[:, np.newaxis]
 
+@free_gpu_memory
 def prune_blobs(spots_list):
     overlap = .5
     sigma_list = scale * (max_sigma - min_sigma) + min_sigma
@@ -146,6 +147,7 @@ def prune_blobs(spots_list):
     result_pruned = _prune_blobs(spots_list, overlap)
     return result_pruned
 
+@free_gpu_memory
 def highlight_spots(I,spot_list,contrast_boost=1.6):
 	# bgremoved_fluorescence_spotBoxed = np.copy(bgremoved_fluorescence)
 	I = I.astype('float16')/255 # this copies the image
@@ -166,6 +168,7 @@ def add_bounding_box(I,x,y,r,extension=2,color=[0.6,0.6,0]):
 		I[y_min:y_max+1,x_min,i] = color[i]
 		I[y_min:y_max+1,x_max,i] = color[i]
 
+@free_gpu_memory
 def remove_spots_in_masked_regions(spotList,mask):
 	mask = mask.astype('float')/255
 	mask = np.sum(mask,axis=-1) # masked out region has pixel value 0 ;# mask[mask>0] = 1 #         cv2.imshow('mask',mask) # cv2.waitKey(0)
@@ -177,6 +180,7 @@ def remove_spots_in_masked_regions(spotList,mask):
 	spot_list = np.array([s for s in spotList if s[-1] > 0])
 	return spot_list
 
+@free_gpu_memory
 def extract_spot_data(I_background_removed,I_raw,spot_list,i,j,k,settings,extension=1):
 	downsize_factor=settings['spot_detection_downsize_factor']
 	extension = extension*downsize_factor
@@ -252,6 +256,7 @@ def seg_spot_filter_one_fov(mask, spots, crop_offset_x=100, crop_offset_y=100, o
     # Convert list of overlapping spots to numpy array
     return np.array(overlapping_spots)
 
+@free_gpu_memory
 def generate_dpc(I1, I2, use_gpu=False):
     if use_gpu:
         # Convert numpy arrays to CuPy arrays
