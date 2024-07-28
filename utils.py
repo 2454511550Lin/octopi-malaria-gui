@@ -14,12 +14,19 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os, sys
 
+def free_gpu_memory(func):
+    def wrapper_func(*args, **kwargs):
+        retval = func(*args, **kwargs)
+        cp._default_memory_pool.free_all_blocks()
+        return retval
+    return wrapper_func
 
 def imread_gcsfs(fs,file_path):
 	img_bytes = fs.cat(file_path)
 	I = imageio.core.asarray(imageio.imread(img_bytes, "bmp"))
 	return I
 
+@free_gpu_memory
 def resize_cp(ar,downsize_factor=4):
 	# by Rinni
     if not cp.is_available():
@@ -33,6 +40,7 @@ def resize_cp(ar,downsize_factor=4):
     
     return s_ar
 
+@free_gpu_memory
 def resize_image_cp(I,downsize_factor=4):
      # check if I is numpy array
     if not cp.is_available():
@@ -48,6 +56,7 @@ def resize_image_cp(I,downsize_factor=4):
         cp.get_default_memory_pool().free_all_blocks()
     return I_resized
 
+@free_gpu_memory
 def remove_background(img_cpu, return_gpu_image=True):
     # check if the cp device is available
     if not cp.is_available():
@@ -70,11 +79,13 @@ def remove_background(img_cpu, return_gpu_image=True):
     
     return result
 
+@free_gpu_memory
 def gaussian_kernel_1d(n, std, normalized=True):
     if normalized:
         return cp.asarray(signal.gaussian(n, std))/(np.sqrt(2 * np.pi)*std)
     return cp.asarray(signal.gaussian(n, std), dtype=cp.float16)
 
+@free_gpu_memory
 def detect_spots(I, thresh = 12):
     # filters
     # check if the cp device is available
@@ -114,8 +125,6 @@ def detect_spots(I, thresh = 12):
             spots[i][1] = int(ind[0][i])
             spots[i][2] = int(img_traceback[spots[i][1]][spots[i][0]])
         spots = spots.astype(int)
-
-        cp.get_default_memory_pool().free_all_blocks()
     return spots
 
 # filter spots to avoid overlapping ones
