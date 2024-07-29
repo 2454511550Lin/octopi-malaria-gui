@@ -549,7 +549,14 @@ class ImageAnalysisUI(QMainWindow):
         self.fov_image_cache.clear()
         self.fov_data.clear()
         self.fov_image_data.clear()
-        
+
+        # save the stats to the save_path
+        try:
+            with open(os.path.join(self.shared_config.get_path(), "stats.txt"), "w") as f:
+                # write what is shown in the stats_label
+                f.write(self.stats_label_small.text())
+        except Exception as e:
+            self.logger.error(f"Error saving stats: {e}")
         # Reset UI elements
         self.fov_table.setRowCount(0)
         self.virtual_image_list.clear()
