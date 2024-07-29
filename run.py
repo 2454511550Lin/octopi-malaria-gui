@@ -41,8 +41,8 @@ timeout = 0.1
 shared_config = SharedConfig()
 shared_config.set_path('data')
 
-INIT_FOCUS_RANGE_START_MM = 6.2
-INIT_FOCUS_RANGE_END_MM = 6.7
+INIT_FOCUS_RANGE_START_MM = 6.4
+INIT_FOCUS_RANGE_END_MM = 6.5
 SCAN_FOCUS_SEARCH_RANGE_MM = 0.1
 
 import cv2
@@ -209,7 +209,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
             # set the chanel to BF
 
             microscope.set_channel("BF LED matrix left half")
-            microscope.run_autofocus(step_size_mm = [0.01, 0.001], start_z_mm = INIT_FOCUS_RANGE_START_MM, end_z_mm = INIT_FOCUS_RANGE_END_MM)
+            z_focus_init = microscope.run_autofocus(step_size_mm = [0.01, 0.0015], start_z_mm = INIT_FOCUS_RANGE_START_MM, end_z_mm = INIT_FOCUS_RANGE_END_MM)
 
             # generate the focus map
             # scan settings
@@ -217,11 +217,14 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
             dy_mm = 0.9
             Nx = shared_config.nx.value
             Ny = shared_config.ny.value
-            Nx_focus = 2
-            Ny_focus = 2
+            # calculate the number of focus points such that for each grid, the edge cannot exceed 10 units
+            Nx_focus = int(np.ceil(Nx/10)+1)
+            Ny_focus = int(np.ceil(Ny/10)+1)
             offset_x_mm = microscope.get_x()
             offset_y_mm = microscope.get_y()
             offset_z_mm = microscope.get_z()
+
+            print(f"Nx_focus: {Nx_focus}, Ny_focus: {Ny_focus}")
 
             # generate scan grid
             scan_grid = generate_scan_grid(dx_mm, dy_mm, Nx, Ny, offset_x_mm, offset_y_mm, S_scan=True)
@@ -229,13 +232,19 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
             # generate focus map
             x = offset_x_mm + np.linspace(0, (Nx - 1) * dx_mm, Nx_focus)
             y = offset_y_mm + np.linspace(0, (Ny - 1) * dy_mm, Ny_focus)
+            print(f"x: {x}, y: {y}")
             focus_map = []
             microscope.set_channel("BF LED matrix left half")
+            init = True
             for yi in y:
                 microscope.move_y_to(yi)
                 for xi in x:
                     microscope.move_x_to(xi)
-                    z_focus = microscope.run_autofocus(step_size_mm = [0.01, 0.001], start_z_mm = offset_z_mm - SCAN_FOCUS_SEARCH_RANGE_MM/2, end_z_mm = offset_z_mm + SCAN_FOCUS_SEARCH_RANGE_MM/2)
+                    if init:
+                        z_focus = z_focus_init
+                        init = False
+                    else:
+                        z_focus = microscope.run_autofocus(step_size_mm = [0.01, 0.001], start_z_mm = offset_z_mm - SCAN_FOCUS_SEARCH_RANGE_MM/2, end_z_mm = offset_z_mm + SCAN_FOCUS_SEARCH_RANGE_MM/2)
                     focus_map.append((xi, yi, z_focus))
                     offset_z_mm = z_focus
             #logger.info("Focus map: ",focus_map)

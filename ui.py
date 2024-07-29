@@ -838,7 +838,7 @@ class ImageAnalysisUI(QMainWindow):
         self.start_button.setText("Scanning in progress")
 
     def check_auto_focus_status(self):
-        print(f"Checking auto-focus status. Indicator: {self.shared_config.auto_focus_indicator.value}")
+        #print(f"Checking auto-focus status. Indicator: {self.shared_config.auto_focus_indicator.value}")
         QApplication.processEvents()  # Force processing of events
         if self.shared_config.auto_focus_indicator.value:
             print("Auto-focus complete. Closing dialog.")
