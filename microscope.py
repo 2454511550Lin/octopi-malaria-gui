@@ -406,21 +406,21 @@ class Microscope(QObject):
                 start_z = max(start_z_mm, best_z - search_range/2)
                 end_z = min(end_z_mm, best_z + search_range/2)
 
-            print(f"Searching in range: {start_z:.6f} mm to {end_z:.6f} mm")
+            #print(f"Searching in range: {start_z:.6f} mm to {end_z:.6f} mm")
             stage_best_z, stage_best_focus = focus_search(start_z, end_z, step_size)
 
             if stage_best_focus > best_focus:
                 best_z = stage_best_z
                 best_focus = stage_best_focus
 
-            print(f"Stage {i+1} best focus: z = {best_z:.6f} mm, focus measure = {best_focus:.2f}")
+            #print(f"Stage {i+1} best focus: z = {best_z:.6f} mm, focus measure = {best_focus:.2f}")
 
         # Move to the best focus position
         self.move_z_to(best_z)
 
-        print(f"Final best focus found at z = {best_z:.6f} mm with focus measure: {best_focus:.2f}")
+        print(f"Final best focus found at z = {best_z:.5f} mm with focus measure: {best_focus:.4f}")
     
-        return best_z
+        return best_z, best_focus
 
     def start_live(self):
         self.camera.start_streaming()

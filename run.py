@@ -208,9 +208,10 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
             # do auto focus
             # set the chanel to BF
 
+            logger.info("Running autofocus")
             microscope.set_channel("BF LED matrix left half")
-            z_focus_init = microscope.run_autofocus(step_size_mm = [0.01, 0.0015], start_z_mm = INIT_FOCUS_RANGE_START_MM, end_z_mm = INIT_FOCUS_RANGE_END_MM)
-
+            z_focus_init, best_focus_init = microscope.run_autofocus(step_size_mm = [0.01, 0.0015], start_z_mm = INIT_FOCUS_RANGE_START_MM, end_z_mm = INIT_FOCUS_RANGE_END_MM)
+            logger.info(f"Initial focus: z = {z_focus_init:.3f} mm, focus measure = {best_focus_init:.3f}")
             # generate the focus map
             # scan settings
             dx_mm = 0.9
@@ -236,22 +237,25 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
             focus_map = []
             microscope.set_channel("BF LED matrix left half")
             init = True
-            for yi in y:
+            for i, yi in enumerate(y):
                 microscope.move_y_to(yi)
-                for xi in x:
+                x_range = x if i % 2 == 0 else x[::-1]
+                for xi in x_range:
                     microscope.move_x_to(xi)
                     if init:
                         z_focus = z_focus_init
                         init = False
                     else:
-                        z_focus = microscope.run_autofocus(step_size_mm = [0.01, 0.001], start_z_mm = offset_z_mm - SCAN_FOCUS_SEARCH_RANGE_MM/2, end_z_mm = offset_z_mm + SCAN_FOCUS_SEARCH_RANGE_MM/2)
+                        z_focus,best_focus = microscope.run_autofocus(step_size_mm = [0.01, 0.001], start_z_mm = offset_z_mm - SCAN_FOCUS_SEARCH_RANGE_MM/2, end_z_mm = offset_z_mm + SCAN_FOCUS_SEARCH_RANGE_MM/2)
+                        logger.info(f"At x: {xi:.3f}, y: {yi:.3f}, z: {z_focus:.3f}, best focus: {best_focus:.3f}")
                     focus_map.append((xi, yi, z_focus))
                     offset_z_mm = z_focus
-            #logger.info("Focus map: ",focus_map)
+
             z_map = interpolate_focus(scan_grid, focus_map)
 
             shared_config.set_auto_focus_indicator(True)
             time.sleep(0.5)
+            logger.info("Autofocus done")
 
             # scan using focus map
             prev_x, prev_y = None, None
