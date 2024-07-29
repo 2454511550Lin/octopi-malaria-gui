@@ -377,10 +377,13 @@ class Microscope(QObject):
                 focus_measure = utils.calculate_focus_measure(image, FOCUS_MEASURE_OPERATOR)
                 focus_measures.append(focus_measure)
             
-            # print a table of z positions and focus measures
-            print("Z position (mm) | Focus measure")
-            for z, focus_measure in zip(z_positions, focus_measures):
-                print(f"{z:.3f} | {focus_measure:.2f}")
+            # Create formatted strings for z positions and focus measures
+            z_positions_str = " ".join([f"{z:.3f}" for z in z_positions])
+            focus_measures_str = " ".join([f"{fm:.3f}" for fm in focus_measures])
+
+            # Print (or log) the formatted strings
+            print(f"Z positions (mm): {z_positions_str}")
+            print(f"Focus measures: {focus_measures_str}")
             best_focus_index = np.argmax(focus_measures)
             return z_positions[best_focus_index], focus_measures[best_focus_index]
 
