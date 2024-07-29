@@ -207,6 +207,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
         try:
             # do auto focus
             # set the chanel to BF
+
             microscope.set_channel("BF LED matrix left half")
             microscope.run_autofocus(step_size_mm = [0.01, 0.001], start_z_mm = INIT_FOCUS_RANGE_START_MM, end_z_mm = INIT_FOCUS_RANGE_END_MM)
 
@@ -239,6 +240,9 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                     offset_z_mm = z_focus
             #logger.info("Focus map: ",focus_map)
             z_map = interpolate_focus(scan_grid, focus_map)
+
+            shared_config.set_auto_focus_indicator(True)
+            time.sleep(0.5)
 
             # scan using focus map
             prev_x, prev_y = None, None

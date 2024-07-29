@@ -409,6 +409,9 @@ class SharedConfig:
         self.is_live_view_active = self.manager.Value('b', False)
         self.live_channel_selected = self.manager.Value('i', 0)
         self.live_channels_list = self.manager.list(["BF LED matrix left half","BF LED matrix right half","Fluorescence 405 nm Ex"])
+
+        # indicator for auto-focusing
+        self.auto_focus_indicator = self.manager.Value('b', False)
         
         self.IMAGE_SHAPE = (2800, 2800,3)
         self.IMAGE_SIZE = self.IMAGE_SHAPE[0] * self.IMAGE_SHAPE[1] * self.IMAGE_SHAPE[2]
@@ -425,6 +428,9 @@ class SharedConfig:
 
         self.SAVE_NPY = self.manager.Value('b', False)
 
+    def set_auto_focus_indicator(self, value):
+        self.auto_focus_indicator.value = value
+    
     def set_log_file(self, log_file):
         self.log_file.value = log_file
 

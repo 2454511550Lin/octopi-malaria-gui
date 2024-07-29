@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QSplitter, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QMessageBox, QStyleFactory, QFileDialog,
-    QComboBox, QCheckBox, QGroupBox, QGridLayout,QSpinBox, QFrame
+    QComboBox, QCheckBox, QGroupBox, QGridLayout,QSpinBox, QFrame, QDialog
 )
 from PyQt5.QtGui import QImage, QColor, QFont
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
@@ -578,6 +578,8 @@ class ImageAnalysisUI(QMainWindow):
         self.first_fov_time = None
         self.latest_fov_time = None
 
+        self.shared_config.set_auto_focus_indicator(False)
+
 
     def update_avg_processing_time(self):
         if self.first_fov_time is not None and self.latest_fov_time:
@@ -809,7 +811,18 @@ class ImageAnalysisUI(QMainWindow):
         self.shared_config.set_log_file(os.path.join(directory, f"{self.patient_id}"))
         self.logger = self.shared_config.setup_process_logger()
         self.logger.info(f"Starting analysis for patient {self.patient_id}")
-        
+
+        self.auto_focus_dialog = AutoFocusDialog(self)
+    
+        # Start the timer before showing the dialog
+        self.auto_focus_timer = QTimer(self)
+        self.auto_focus_timer.timeout.connect(self.check_auto_focus_status)
+        self.auto_focus_timer.start(500)  # Check every 500 ms
+
+        self.auto_focus_dialog.show()
+        QApplication.processEvents()  
+
+
         self.shared_config.save_bf_images.value = self.bf_image_check.isChecked()
         self.shared_config.save_fluo_images.value = self.fluo_image_check.isChecked()
         self.shared_config.save_spot_images.value = self.positives_images_check.isChecked()
@@ -824,6 +837,29 @@ class ImageAnalysisUI(QMainWindow):
         self.start_button.setEnabled(False)
         self.start_button.setText("Scanning in progress")
 
+    def check_auto_focus_status(self):
+        print(f"Checking auto-focus status. Indicator: {self.shared_config.auto_focus_indicator.value}")
+        QApplication.processEvents()  # Force processing of events
+        if self.shared_config.auto_focus_indicator.value:
+            print("Auto-focus complete. Closing dialog.")
+            self.auto_focus_timer.stop()
+            self.auto_focus_dialog.close()
+            self.auto_focus_dialog = None
+            QApplication.processEvents()  
+
+
+class AutoFocusDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Auto-focus")
+        self.setModal(True)
+        layout = QVBoxLayout(self)
+        self.label = QLabel("Auto-focusing in progress. Please wait...")
+        layout.addWidget(self.label)
+
+    def closeEvent(self, event):
+        print("Dialog close event triggered")
+        event.accept()
 class UIThread(QThread):
     update_fov = pyqtSignal(str)
     update_images = pyqtSignal(str, np.ndarray, np.ndarray)
