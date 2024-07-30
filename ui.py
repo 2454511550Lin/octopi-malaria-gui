@@ -609,7 +609,7 @@ class ImageAnalysisUI(QMainWindow):
             for img, score in zip(images, scores):
                 img_hash = hash(img.tobytes())
                 if img_hash not in self.image_cache:
-                    overlay_img = numpy2png(img, resize_factor=None)
+                    overlay_img = numpy2png(img, resize_factor=4)
                     if overlay_img is not None:
                         qimg = self.create_qimage(overlay_img)
                         self.image_cache[img_hash] = (qimg, score)
