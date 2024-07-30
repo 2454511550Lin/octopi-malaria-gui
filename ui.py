@@ -288,7 +288,7 @@ class ImageAnalysisUI(QMainWindow):
         self.update_avg_timer.timeout.connect(self.update_avg_processing_time)
         self.update_avg_timer.start(1000) 
 
-        self.stats_label_small = QLabel("FoVs: 0 | Total RBCs: 0 | Total Positives: 0")
+        self.stats_label_small = QLabel("FoVs: 0 | RBCs: 0 | Parasites / μl: 0")
         self.stats_label_small.setStyleSheet("""
             font-size: 14px;
         """)     
@@ -326,11 +326,11 @@ class ImageAnalysisUI(QMainWindow):
         self.cropped_tab = QWidget()
         self.cropped_layout = QVBoxLayout(self.cropped_tab)
 
-        self.stats_label = QLabel("FoVs: 0 | Total RBC Count: 0 | Total Malaria Positives: 0")
+        self.stats_label = QLabel("FoVs: 0 | Total RBC Count: 0 | Total Malaria Positives: 0 | Parasites / μl: 0 | Parasitemia: 0%")
         self.stats_label.setStyleSheet("""
             margin-top: 10px; 
             margin-bottom: 10px;
-            font-size: 50px;
+            font-size: 35px;
             color: black;
         """)
         self.cropped_layout.addWidget(self.stats_label)
@@ -554,7 +554,7 @@ class ImageAnalysisUI(QMainWindow):
         try:
             with open(os.path.join(self.shared_config.get_path(), "stats.txt"), "w") as f:
                 # write what is shown in the stats_label
-                f.write(self.stats_label_small.text())
+                f.write(self.stats_label.text())
         except Exception as e:
             self.logger.error(f"Error saving stats: {e}")
         # Reset UI elements
@@ -563,8 +563,8 @@ class ImageAnalysisUI(QMainWindow):
         self.fov_image_view.clear()
         self.patient_id_label.setText("")
         self.positive_images_widget.image_list.clear()
-        self.stats_label.setText("FoVs: 0 | Total RBC Count: 0 | Total Malaria Positives: 0")
-        self.stats_label_small.setText("FoVs: 0 | Total RBCs: 0 | Total Positives: 0")
+        self.stats_label.setText("FoVs: 0 | RBCs count: 0 | Positives: 0 | Parasites / μl: 0 | Parasitemia: 0%")
+        self.stats_label_small.setText("FoVs: 0 | RBCs: 0 | Parasites / μl: 0")
         
         # Reset other variables
         self.current_fov_index = -1
@@ -608,7 +608,7 @@ class ImageAnalysisUI(QMainWindow):
             for img, score in zip(images, scores):
                 img_hash = hash(img.tobytes())
                 if img_hash not in self.image_cache:
-                    overlay_img = numpy2png(img, resize_factor=None)
+                    overlay_img = numpy2png(img, resize_factor=4)
                     if overlay_img is not None:
                         qimg = self.create_qimage(overlay_img)
                         self.image_cache[img_hash] = (qimg, score)
@@ -787,8 +787,11 @@ class ImageAnalysisUI(QMainWindow):
     def update_stats(self):
         total_rbc = sum(data['rbc_count'] for data in self.fov_data.values())
         total_positives = self.virtual_image_list.model.rowCount()
-        self.stats_label.setText(f"FoVs: {len(self.fov_data)} | Total RBC Count: {total_rbc} | Total Malaria Positives: {total_positives}")
-        self.stats_label_small.setText(f"FoVs: {len(self.fov_data)} | Total RBCs: {total_rbc} | Total Positives: {total_positives}")
+        # round to two decimal places   
+        parasite_per_ul = round(total_positives  * (5000000 / total_rbc), 2)
+        parasitemia_percentage = round(total_positives / total_rbc * 100, 2)
+        self.stats_label.setText(f"FoVs: {len(self.fov_data)} | RBCs Count: {total_rbc:,} | Positives: {total_positives} | Parasites / μl: {parasite_per_ul:.3f} | Parasitemia: {parasitemia_percentage:.3f}%")
+        self.stats_label_small.setText(f"FoVs: {len(self.fov_data)} | RBCs: {total_rbc:,} | Parasites / μl: {parasite_per_ul:.2f}")
 
     def start_analysis(self):
         self.patient_id = self.patient_id_input.text().strip()
