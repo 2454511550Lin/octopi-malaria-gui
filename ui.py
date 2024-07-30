@@ -602,6 +602,7 @@ class ImageAnalysisUI(QMainWindow):
             self.directory_input.setText(directory)
     
     def update_cropped_images(self, fov_id, images, scores):
+        
         with self.image_lock:
             malaria_positives = 0
             updated_images = []
@@ -628,8 +629,8 @@ class ImageAnalysisUI(QMainWindow):
         self.virtual_image_list.update_images(updated_images, fov_id)
         self.update_stats()
 
-        if fov_id == self.selected_fov_id and self.positive_images_widget.image_list.isVisible():
-            self.update_positive_images(fov_id)
+        #if fov_id == self.selected_fov_id and self.positive_images_widget.image_list.isVisible():
+        self.update_positive_images(fov_id)
 
     def update_all_fov_images(self):
         self.virtual_image_list.clear()
@@ -747,6 +748,8 @@ class ImageAnalysisUI(QMainWindow):
     def update_positive_images(self, fov_id):
         if fov_id in self.fov_image_data:
             self.positive_images_widget.update_images(self.fov_image_data[fov_id], fov_id)
+        else:
+            print(f"No positive images for FOV {fov_id}")
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -788,10 +791,10 @@ class ImageAnalysisUI(QMainWindow):
         total_rbc = sum(data['rbc_count'] for data in self.fov_data.values())
         total_positives = self.virtual_image_list.model.rowCount()
         # round to two decimal places   
-        parasite_per_ul = round(total_positives  * (5000000 / total_rbc), 2)
-        parasitemia_percentage = round(total_positives / total_rbc * 100, 2)
-        self.stats_label.setText(f"FoVs: {len(self.fov_data)} | RBCs Count: {total_rbc:,} | Positives: {total_positives} | Parasites / μl: {parasite_per_ul:.3f} | Parasitemia: {parasitemia_percentage:.3f}%")
-        self.stats_label_small.setText(f"FoVs: {len(self.fov_data)} | RBCs: {total_rbc:,} | Parasites / μl: {parasite_per_ul:.2f}")
+        parasite_per_ul = round(total_positives  * (5000000 / (total_rbc + 1)), 2)
+        parasitemia_percentage = round(total_positives / (total_rbc + 1) * 100, 2)
+        self.stats_label.setText(f"FoVs: {len(self.fov_data)} | RBCs Count: {total_rbc:,} | Positives: {total_positives:,} | Parasites / μl: {int(parasite_per_ul):,} | Parasitemia: {parasitemia_percentage:.2f}%")
+        self.stats_label_small.setText(f"FoVs: {len(self.fov_data)} | RBCs: {total_rbc:,} | Parasites / μl: {int(parasite_per_ul):,}")
 
     def start_analysis(self):
         self.patient_id = self.patient_id_input.text().strip()

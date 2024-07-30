@@ -268,7 +268,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                     microscope.move_y_to(y)
                     prev_y = y
                 microscope.move_z_to(z)
-                fov_id = f"{i}"
+                fov_id = f"{i+1}"
                 log_time(fov_id, "Image Acquisition", "start")
                 channels = ["BF LED matrix left half","BF LED matrix right half","Fluorescence 405 nm Ex"]
 
@@ -329,6 +329,9 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
     
                 dpc_queue.put(fov_id)
                 fluorescent_queue.put(fov_id)
+
+                if i<=3:
+                    time.sleep(0.5)
 
                 log_time(fov_id, "Image Acquisition", "end")
         except Exception as e:
