@@ -45,6 +45,10 @@ INIT_FOCUS_RANGE_START_MM = 6.4
 INIT_FOCUS_RANGE_END_MM = 6.5
 SCAN_FOCUS_SEARCH_RANGE_MM = 0.1
 
+
+
+
+
 import cv2
 
 def log_time(fov_id: str, process_name: str, event: str):
@@ -155,14 +159,12 @@ def image_acquisition_simulation(dpc_queue: mp.Queue, fluorescent_queue: mp.Queu
             
 from microscope import Microscope
 def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
-
+    
     simulation = False
     microscope = Microscope(is_simulation=simulation)
-
     microscope.camera.start_streaming()
     microscope.camera.set_software_triggered_acquisition()
     microscope.camera.disable_callback()
-
     microscope.home_xyz()
     
     live_channel_index = -1
