@@ -568,6 +568,7 @@ class ImageAnalysisUI(QMainWindow):
                     """)
 
     def shutdown(self):
+        self.new_patient()
         self.shutdown_signal.emit()
         self.close()
 
