@@ -45,9 +45,14 @@ INIT_FOCUS_RANGE_START_MM = 6.4
 INIT_FOCUS_RANGE_END_MM = 6.5
 SCAN_FOCUS_SEARCH_RANGE_MM = 0.1
 
+# try to load the INIT_FOCUS_RANGE from a txt
+try:
+    with open('init_focus_range.txt', 'r') as f:
+        INIT_FOCUS_RANGE_START_MM, INIT_FOCUS_RANGE_END_MM, SCAN_FOCUS_SEARCH_RANGE_MM = map(float, f.readline().split())
+except:
+    pass
 
-
-
+print(f"INIT_FOCUS_RANGE_START_MM: {INIT_FOCUS_RANGE_START_MM:.3f}, INIT_FOCUS_RANGE_END_MM: {INIT_FOCUS_RANGE_END_MM:.3f}, SCAN_FOCUS_SEARCH_RANGE_MM: {SCAN_FOCUS_SEARCH_RANGE_MM:.3f}")
 
 import cv2
 
@@ -159,13 +164,15 @@ def image_acquisition_simulation(dpc_queue: mp.Queue, fluorescent_queue: mp.Queu
             
 from microscope import Microscope
 def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
-    
+    global INIT_FOCUS_RANGE_START_MM, INIT_FOCUS_RANGE_END_MM, SCAN_FOCUS_SEARCH_RANGE_MM
+  
     simulation = False
     microscope = Microscope(is_simulation=simulation)
     microscope.camera.start_streaming()
     microscope.camera.set_software_triggered_acquisition()
     microscope.camera.disable_callback()
     microscope.home_xyz()
+    microscope.move_z_to((INIT_FOCUS_RANGE_START_MM + INIT_FOCUS_RANGE_END_MM) / 2)
     
     live_channel_index = -1
 
@@ -184,8 +191,6 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                     microscope.to_loading_position()
                     shared_config.reset_to_loading()
                     continue
-
-            #main_logger.info("Check the live view active vlaue: ", shared_config.is_live_view_active.value)
             
             if shared_config.is_live_view_active.value:
 
@@ -194,11 +199,24 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                     # get the value from manager.list
                     microscope.set_channel(shared_config.live_channels_list[live_channel_index])
 
-                image = microscope.acquire_image()
-
-                #main_logger.info("Live view image shape: ", image.shape)
-                
+                image = microscope.acquire_image()                
                 shared_config.set_live_view_image(crop_image(image))
+
+            # add a option to run the calibration of the autofocus searching range
+            elif shared_config.is_auto_focus_calibration.value:
+                # run the calibration
+                microscope.set_channel("BF LED matrix left half")
+                z_focus_init, _ = microscope.run_autofocus(step_size_mm = [0.01, 0.0015], start_z_mm = 6.0, end_z_mm = 7.0)
+                # with this z_focus_init, we know that the autofocus searching range is 0.1 mm
+                INIT_FOCUS_RANGE_START_MM = z_focus_init - 0.05
+                INIT_FOCUS_RANGE_END_MM = z_focus_init + 0.05
+                SCAN_FOCUS_SEARCH_RANGE_MM = 0.1
+                # save the range to a txt
+                with open('init_focus_range.txt', 'w') as f:
+                    f.write(f"{INIT_FOCUS_RANGE_START_MM} {INIT_FOCUS_RANGE_END_MM} {SCAN_FOCUS_SEARCH_RANGE_MM}")
+
+                shared_config.is_auto_focus_calibration.value = False
+                print(f"Auto focus calibration done, range: {INIT_FOCUS_RANGE_START_MM:.3f} - {INIT_FOCUS_RANGE_END_MM:.3f} mm, search range: {SCAN_FOCUS_SEARCH_RANGE_MM:.3f} mm")
             
             time.sleep(1/shared_config.frame_rate.value)
             
@@ -207,13 +225,13 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
         logger = shared_config.setup_process_logger()
 
         try:
-            # do auto focus
-            # set the chanel to BF
 
             logger.info("Running autofocus")
             microscope.set_channel("BF LED matrix left half")
-            z_focus_init, best_focus_init = microscope.run_autofocus(step_size_mm = [0.01, 0.0015], start_z_mm = INIT_FOCUS_RANGE_START_MM, end_z_mm = INIT_FOCUS_RANGE_END_MM)
-            logger.info(f"Initial focus: z = {z_focus_init:.3f} mm, focus measure = {best_focus_init:.3f}")
+            #z_focus_init, best_focus_init = microscope.run_autofocus(step_size_mm = [0.01, 0.0015], start_z_mm = INIT_FOCUS_RANGE_START_MM, end_z_mm = INIT_FOCUS_RANGE_END_MM)
+            #logger.info(f"Initial focus: z = {z_focus_init:.3f} mm, focus measure = {best_focus_init:.3f}")
+            z_focus_init = (INIT_FOCUS_RANGE_START_MM + INIT_FOCUS_RANGE_END_MM) / 2
+            microscope.move_z_to(z_focus_init)
             # generate the focus map
             # scan settings
             dx_mm = 0.9
@@ -238,18 +256,13 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
             print(f"x: {x}, y: {y}")
             focus_map = []
             microscope.set_channel("BF LED matrix left half")
-            init = True
             for i, yi in enumerate(y):
                 microscope.move_y_to(yi)
                 x_range = x if i % 2 == 0 else x[::-1]
                 for xi in x_range:
                     microscope.move_x_to(xi)
-                    if init:
-                        z_focus = z_focus_init
-                        init = False
-                    else:
-                        z_focus,best_focus = microscope.run_autofocus(step_size_mm = [0.01, 0.001], start_z_mm = offset_z_mm - SCAN_FOCUS_SEARCH_RANGE_MM/2, end_z_mm = offset_z_mm + SCAN_FOCUS_SEARCH_RANGE_MM/2)
-                        logger.info(f"At x: {xi:.3f}, y: {yi:.3f}, z: {z_focus:.3f}, best focus: {best_focus:.3f}")
+                    z_focus,best_focus = microscope.run_autofocus(step_size_mm = [0.01, 0.001], start_z_mm = offset_z_mm - SCAN_FOCUS_SEARCH_RANGE_MM/2, end_z_mm = offset_z_mm + SCAN_FOCUS_SEARCH_RANGE_MM/2)
+                    logger.info(f"At x: {xi:.3f}, y: {yi:.3f}, z: {z_focus:.3f}, best focus: {best_focus:.3f}")
                     focus_map.append((xi, yi, z_focus))
                     offset_z_mm = z_focus
 
@@ -261,7 +274,6 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
 
             # scan using focus map
             prev_x, prev_y = None, None
-            coordinates = []
             for i, ((x, y), z) in enumerate(zip(scan_grid, z_map)):
                 if x != prev_x:
                     microscope.move_x_to(x)

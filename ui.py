@@ -152,6 +152,18 @@ class ImageAnalysisUI(QMainWindow):
         """)
         top_layout.addWidget(self.new_patient_button)
 
+        # Add this after the "New Patient" button
+        self.load_patient_button = QPushButton("Load Patient")
+        self.load_patient_button.clicked.connect(self.load_patient)
+        self.load_patient_button.setStyleSheet("""
+            QPushButton { 
+                background-color: #28a745; 
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #218838; }
+        """)
+        top_layout.addWidget(self.load_patient_button)
+
         self.shutdown_button = QPushButton("Shutdown")
         self.shutdown_button.clicked.connect(self.shutdown)
         self.shutdown_button.setStyleSheet("""
@@ -363,6 +375,10 @@ class ImageAnalysisUI(QMainWindow):
         self.live_button.clicked.connect(self.toggle_live_view)
         left_layout.addWidget(self.live_button, alignment=Qt.AlignTop | Qt.AlignLeft)
 
+        # add a button for auto focus calibration
+        self.auto_focus_calibration_button = QPushButton("Auto-Focus Calibration")
+        self.auto_focus_calibration_button.clicked.connect(self.auto_focus_calibration)
+        left_layout.addWidget(self.auto_focus_calibration_button, alignment=Qt.AlignTop| Qt.AlignLeft)
 
         # Add left container to main layout
         live_view_layout.addWidget(left_container)
@@ -450,6 +466,18 @@ class ImageAnalysisUI(QMainWindow):
     def switch_channel(self):
         index = self.channel_combo.currentIndex()
         self.shared_config.set_channel_selected(index)
+    
+    def auto_focus_calibration(self):
+        self.shared_config.is_auto_focus_calibration.value = True
+        # generate a window saying it is doing the calibration while shared_config.is_auto_focus_calibration.value == True
+        self.calibration_dialog = AutoFocusDialog(self, title="Auto-focus calibration", message="The system is calibrating the auto-focus. Please wait...")
+        # Start the timer before showing the dialog
+        self.calibration_timer = QTimer(self)
+        self.calibration_timer.timeout.connect(self.check_calibration_status)
+        self.calibration_timer.start(500)  # Check every 500 ms
+
+        self.calibration_dialog.show()
+        QApplication.processEvents() 
 
     def setup_fov_image_view(self,image_view):
         image_view.ui.roiBtn.hide()
@@ -544,19 +572,28 @@ class ImageAnalysisUI(QMainWindow):
         self.close()
 
     def new_patient(self):
+
+        try:
+            stats_path = os.path.join(self.shared_config.get_path(), "stats.txt")
+            if not os.path.exists(stats_path):
+                with open(stats_path, "w") as f:
+                # write what is shown in the stats_label
+                    f.write(self.stats_label.text())
+            rbc_path = os.path.join(self.shared_config.get_path(), "rbc_counts.csv")
+            if not os.path.exists(rbc_path):
+                # save the RBCs count as a csv
+                with open(rbc_path, "w") as f:
+                    for fov_id, data in self.fov_data.items():
+                        f.write(f"{fov_id},{data['rbc_count']}\n")
+        except Exception as e:
+            self.logger.error(f"Error saving stats: {e}")
+
         # Clear all caches and data
         self.image_cache.clear()
         self.fov_image_cache.clear()
         self.fov_data.clear()
         self.fov_image_data.clear()
 
-        # save the stats to the save_path
-        try:
-            with open(os.path.join(self.shared_config.get_path(), "stats.txt"), "w") as f:
-                # write what is shown in the stats_label
-                f.write(self.stats_label.text())
-        except Exception as e:
-            self.logger.error(f"Error saving stats: {e}")
         # Reset UI elements
         self.fov_table.setRowCount(0)
         self.virtual_image_list.clear()
@@ -860,19 +897,95 @@ class ImageAnalysisUI(QMainWindow):
             self.auto_focus_dialog = None
             QApplication.processEvents()  
 
+    def check_calibration_status(self):
+        #print(f"Checking auto-focus status. Indicator: {self.shared_config.auto_focus_indicator.value}")
+        QApplication.processEvents()  # Force processing of events
+        if self.shared_config.is_auto_focus_calibration.value:
+            print("Auto-focus calibration complete. Closing dialog.")
+            self.calibration_timer.stop()
+            self.calibration_dialog.close()
+            self.calibration_dialog = None
+            QApplication.processEvents()  
+
+    def load_patient(self):
+        # Clear existing data
+        self.new_patient()  # This will clear all the existing data
+        directory = QFileDialog.getExistingDirectory(self, "Select Patient Directory")
+        if directory:
+            patient_id = os.path.basename(directory)
+            print(f"Loading patient {patient_id} from directory {directory}")
+            self.load_patient_data(patient_id, directory)
+
+    def load_patient_data(self, patient_id, directory):
+        self.patient_id = patient_id
+        self.patient_id_label.setText(f"Patient ID: {self.patient_id}")
+        self.shared_config.set_path(directory)
+
+        # Load saved data
+        self.load_saved_data(directory)
+
+        # Switch to the FOVs List tab
+        self.tab_widget.setCurrentIndex(1)
+
+    def load_saved_data(self, directory):
+        # Load stats
+
+        # Load FOV data
+        fovs = [f.split("_dpc")[0] for f in os.listdir(directory) if f.endswith("_dpc.npy") or f.endswith("_dpc.bmp")]
+        # sort the fovs by arithmetic order
+        fovs.sort(key=lambda x: int(x.split("_")[-1]))
+        for fov_id in fovs:
+            self.update_fov_list(fov_id)
+            # Load cropped images and scores if available
+            cropped_path = os.path.join(directory, f"{fov_id}_cropped.npy")
+            scores_path = os.path.join(directory, f"{fov_id}_scores.npy")
+            if os.path.exists(cropped_path) and os.path.exists(scores_path):
+                cropped_images = np.load(cropped_path)
+                scores = np.load(scores_path)
+                self.update_cropped_images(fov_id, cropped_images, scores)
+
+        self.update_all_fov_images()
+
+        self.load_fov_cache(fovs[-1])\
+
+        try:
+            with open(os.path.join(directory, "stats.txt"), "r") as f:
+                stats = f.read()
+                self.stats_label.setText(stats)
+                self.update_stats_small_label(stats)
+
+                # load the csv for the rbc_counts
+                with open(os.path.join(directory, "rbc_counts.csv"), "r") as f:
+                    for line in f:
+                        fov_id, rbc_count = line.strip().split(",")
+                        self.update_rbc_count(fov_id, int(rbc_count))
+
+                # update the stats
+                self.update_stats()
+        except FileNotFoundError:
+            print("Stats file not found")
+
+    def update_stats_small_label(self, stats):
+        # Extract relevant information from stats and update stats_label_small
+        stats_parts = stats.split("|")
+        fovs = stats_parts[0].strip()
+        rbcs = stats_parts[1].strip()
+        parasites = stats_parts[3].strip()
+        self.stats_label_small.setText(f"{fovs} | {rbcs} | {parasites}")
 
 class AutoFocusDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None,title="Auto-focus",message="Auto-focusing in progress. Please wait..."):
         super().__init__(parent)
-        self.setWindowTitle("Auto-focus")
+        self.setWindowTitle(title)
         self.setModal(True)
         layout = QVBoxLayout(self)
-        self.label = QLabel("Auto-focusing in progress. Please wait...")
+        self.label = QLabel(message)
         layout.addWidget(self.label)
 
     def closeEvent(self, event):
         print("Dialog close event triggered")
         event.accept()
+
 class UIThread(QThread):
     update_fov = pyqtSignal(str)
     update_images = pyqtSignal(str, np.ndarray, np.ndarray)
