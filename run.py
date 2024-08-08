@@ -560,6 +560,7 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                     shared_memory_classification[fov_id] = {
                         'cropped_images': cropped_images,
                         'scores': scores,
+                        'filtered_spots': filtered_spots,
                         'filtered_spots_count': len(filtered_spots)
                     }
 
@@ -620,6 +621,8 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
                         np.save(filename, cropped_images)
                         filename = os.path.join(save_path, f"{fov_id}_scores.npy")
                         np.save(filename, scores)
+                        filename = os.path.join(save_path, f"{fov_id}_filtered_spots.npy")
+                        np.save(filename, shared_memory_classification[fov_id]['filtered_spots'])
                     if shared_config.save_dpc_image.value:
                         #filename = os.path.join(save_path, f"{fov_id}_overlay.npy")
                         #fluorescent_image = shared_memory_acquisition[fov_id]['fluorescent']
