@@ -1,4 +1,4 @@
-## Environment
+## GPU 
 Check the nvidia installation by running:
 `nvidia-smi`
 and
