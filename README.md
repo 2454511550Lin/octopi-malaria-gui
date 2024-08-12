@@ -19,9 +19,9 @@ If no error occurs, one can create desktop shortcut
 bash create_shortcut.sh
 ``
 
-Now the desktop has `octopi_malaria.sh` and `octopi_malaria_simulation.sh`, one can right click and `run as program`.
+Now the desktop has a octopi malaria icon, one should right click and select "Allow Lunching". Then one can double click the icon to lunch the program.
 
-## New computer
+## Only for new computer and environment
 
 Please refer to Cephla's [forum](https://forum.squid-imaging.org/t/setting-up-a-new-computer-with-ubuntu/41/2) to install Ubuntu 20.04.6.
 
