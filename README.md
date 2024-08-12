@@ -10,8 +10,9 @@ First time running:
 ```
 git clone https://github.com/2454511550Lin/octopi-malaria-gui.git
 cd octopi-malaria-gui
-python3 run.py
 ```
+
+The main entry is `python3 run.py`. But one can also run `python3 single_fov.py` to test the the processing of a single FOV. Please configure the path to the data folder in `single_fov.py` in main function line `91 and 92`. The sinle fov file, including left and right half, fluorescent and should be places under sample_inputs folder.
 
 If no error occurs, one can create desktop shortcut
 
