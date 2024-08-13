@@ -12,6 +12,13 @@ from log import report
 
 from utils import SharedConfig, numpy2png
 
+try:
+    from google.cloud import storage
+    from google.oauth2 import service_account
+    print("Google Cloud Storage SDK is available")
+except:
+    pass
+
 import os
 
 # Existing shared memory managers
@@ -22,6 +29,10 @@ shared_memory_segmentation = manager.dict()
 shared_memory_fluorescent = manager.dict()
 shared_memory_classification = manager.dict()
 shared_memory_final = manager.dict()
+
+# for patient id queue, used by cloud server
+shared_memory_patient_queue = manager.list()
+patient_queue_lock = manager.Lock()
 
 # New shared memory for timing information
 shared_memory_timing = manager.dict()
@@ -654,7 +665,77 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
             continue
 
     print("Saving process finished")
-        
+
+import random
+def cloud_upload_process(shutdown_event: mp.Event, start_event: mp.Event):
+    # Check for Google Cloud credentials
+    if 'GOOGLE_APPLICATION_CREDENTIALS' not in os.environ:
+        print("Error: Google Cloud credentials not found in environment variables.")
+        return
+
+    # Check for bucket name
+    bucket_name = os.environ.get('GOOGLE_CLOUD_BUCKET')
+    if not bucket_name:
+        print("Error: Google Cloud bucket name not found in environment variables.")
+        return
+
+    # Initialize Google Cloud client
+    credentials = service_account.Credentials.from_service_account_file(
+        os.environ['GOOGLE_APPLICATION_CREDENTIALS'])
+    client = storage.Client(credentials=credentials)
+    bucket = client.bucket(bucket_name)
+
+    while not shutdown_event.is_set():
+        # Process any patients in the queue, regardless of the start_event state
+        with patient_queue_lock:
+            if len(shared_memory_patient_queue) > 0:
+                patient_id = shared_memory_patient_queue[0]
+            else:
+                patient_id = None
+
+        if patient_id:
+            patient_path = os.path.join(shared_config.get_path(), patient_id)
+            stats_file = os.path.join(patient_path, 'stats.txt')
+            rbc_count_file = os.path.join(patient_path, 'rbc_count.txt')
+
+            # Wait for both files to exist
+            while not (os.path.exists(stats_file) and os.path.exists(rbc_count_file)):
+                if shutdown_event.is_set():
+                    return
+                time.sleep(5)  # Check every 5 seconds
+
+            print(f"Uploading data for patient {patient_id}")
+
+            # Upload all cropped images, spot lists, scores, and txt files
+            for root, _, files in os.walk(patient_path):
+                for file in files:
+                    if file.endswith(('.npy', '.txt')):
+                        local_path = os.path.join(root, file)
+                        cloud_path = f"{patient_id}/{file}"
+                        blob = bucket.blob(cloud_path)
+                        blob.upload_from_filename(local_path)
+
+            # Upload all DPC and fluorescent images
+            fov_files = [f for f in os.listdir(patient_path) if f.endswith('_dpc.npy') or f.endswith('_fluorescent.npy')]
+            # randomly select 10 files
+ 
+            fov_files = random.sample(fov_files, 10)
+            for file in fov_files:
+                local_path = os.path.join(patient_path, file)
+                cloud_path = f"{patient_id}/{file}"
+                blob = bucket.blob(cloud_path)
+                blob.upload_from_filename(local_path)
+
+            print(f"Finished uploading data for patient {patient_id}")
+
+            # Remove the patient ID from the queue
+            with patient_queue_lock:
+                shared_memory_patient_queue.pop(0)
+        else:
+            # If no patients in queue, sleep for a short time before checking again
+            time.sleep(3)
+
+    print("Cloud upload process finished")  
 
 def cleanup_process(cleanup_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
     while not shutdown_event.is_set():
