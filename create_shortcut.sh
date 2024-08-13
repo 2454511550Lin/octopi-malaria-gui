@@ -4,7 +4,7 @@
 CURRENT_DIR=$(pwd)
 
 # Create the shortcut script
-cat << EOF > ~/Desktop/octopi_malaria.sh
+cat << EOF > $CURRENT_DIR/go.sh
 #!/bin/bash
 
 # Change to the script directory
@@ -15,19 +15,20 @@ python3 run.py
 EOF
 
 # Create another shortcut for the simulation
-cat << EOF > ~/Desktop/octopi_malaria_simulation.sh
-#!/bin/bash
-
-# Change to the script directory
-cd $CURRENT_DIR
-
-# Run the Python script
-python3 run.py simulation
+cat << EOF > ~/Desktop/octopi_malaria.desktop
+[Desktop Entry]
+Type=Application
+Name=Octopi_malaria
+Comment=Execute the Octopi Malaria analysis script
+Exec=gnome-terminal -- bash -c "$CURRENT_DIR/go.sh; exec bash"
+Icon=$CURRENT_DIR/checkpoint/cephla_logo.svg
+Terminal=true
+Categories=Science;
 EOF
 
 # Make the shortcut script executable
-chmod +x ~/Desktop/octopi_malaria.sh
-chmod +x ~/Desktop/octopi_malaria_simulation.sh
+chmod +x $CURRENT_DIR/go.sh
+chmod +x ~/Desktop/octopi_malaria.desktop
 
-echo "Desktop shortcut created: ~/Desktop/octopi_malaria.sh"
+echo "Desktop shortcut created: ~/Desktop/octopi_malaria.desktop"
 echo "You can now right click this file, and run as program on your desktop to run the program."
