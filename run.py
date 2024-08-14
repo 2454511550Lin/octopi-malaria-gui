@@ -214,6 +214,10 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
 
                 image = microscope.acquire_image()                
                 shared_config.set_live_view_image(crop_image(image))
+                # update the live x and y
+                shared_config.live_x.value = microscope.get_x()
+                shared_config.live_y.value = microscope.get_y()
+                shared_config.live_z.value = microscope.get_z()
 
             # add a option to run the calibration of the autofocus searching range
             elif shared_config.is_auto_focus_calibration.value:
@@ -612,8 +616,6 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
             continue
     print("Classification process finished")
 
-
-from utils import numpy2png
 import os
 
 def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
@@ -707,7 +709,7 @@ def cloud_upload_process(shutdown_event: mp.Event, start_event: mp.Event):
 
             # Wait for both files to exist
             while not (os.path.exists(stats_file) and os.path.exists(rbc_count_file)):
-                print(f"Waiting for patient {patient_id} to be ready \n checking {stats_file} and {rbc_count_file}")
+                print(f"Waiting for patient {patient_id} to be uploaded")
                 if shutdown_event.is_set():
                     return
                 time.sleep(3)  # Check every 5 seconds
@@ -723,24 +725,23 @@ def cloud_upload_process(shutdown_event: mp.Event, start_event: mp.Event):
                             cloud_path = f"{patient_id}/{file}"
                             blob = bucket.blob(cloud_path)
                             blob.upload_from_filename(local_path)
-            # Upload all DPC and fluorescent images
+            
                 fov_ids = [f.replace('_dpc.bmp', '') for f in os.listdir(patient_path) if f.endswith('_dpc.bmp')]
                 print(f"There will be {len(fov_ids)} files uploaded for patient {patient_id}")
                 # randomly select 10 files
                 if len(fov_ids) > 5:
                     fov_ids = random.sample(fov_ids, 5)
                 for fov_id in fov_ids:
-                    # for dpc image
-                    local_path = os.path.join(patient_path, f"{fov_id}_dpc.bmp")
-                    cloud_path = f"{patient_id}/{fov_id}_dpc.bmp"
-                    blob = bucket.blob(cloud_path)
-                    blob.upload_from_filename(local_path)
-                    # for fluorescent image
-                    local_path = os.path.join(patient_path, f"{fov_id}_fluorescent.bmp")
-                    cloud_path = f"{patient_id}/{fov_id}_fluorescent.bmp"
-                    blob = bucket.blob(cloud_path)
-                    blob.upload_from_filename(local_path)
-
+                    if shared_config.save_dpc_image.value:  
+                        local_path = os.path.join(patient_path, f"{fov_id}_dpc.bmp")
+                        cloud_path = f"{patient_id}/{fov_id}_dpc.bmp"
+                        blob = bucket.blob(cloud_path)
+                        blob.upload_from_filename(local_path)
+                    if shared_config.save_fluo_images.value:
+                        local_path = os.path.join(patient_path, f"{fov_id}_fluorescent.bmp")
+                        cloud_path = f"{patient_id}/{fov_id}_fluorescent.bmp"
+                        blob = bucket.blob(cloud_path)
+                        blob.upload_from_filename(local_path)
                 print(f"Finished uploading data for patient {patient_id}")
 
             except Exception as e:
@@ -881,7 +882,7 @@ if __name__ == "__main__":
             ui_process.terminate()
         #logger.info("All processes have been shut down.")
         if cloud_upload_process.is_alive():
-            cloud_upload_process.join(timeout=1)
+            cloud_upload_process.join(timeout=10)
             cloud_upload_process.terminate()
         print("All processes have been shut down.")
         if classification_thread.is_alive() or segmentation_thread.is_alive():

@@ -411,6 +411,9 @@ class SharedConfig:
         self.is_live_view_active = self.manager.Value('b', False)
         self.live_channel_selected = self.manager.Value('i', 0)
         self.live_channels_list = self.manager.list(["BF LED matrix left half","BF LED matrix right half","Fluorescence 405 nm Ex"])
+        self.live_x = self.manager.Value('f', -1)
+        self.live_y = self.manager.Value('f', -1)
+        self.live_z = self.manager.Value('f', -1)
 
         self.is_auto_focus_calibration = self.manager.Value('b', False)
 
