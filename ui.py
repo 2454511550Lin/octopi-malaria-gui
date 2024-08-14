@@ -850,10 +850,15 @@ class ImageAnalysisUI(QMainWindow):
             QMessageBox.warning(self, "Input Error", "Please return to the loading position before starting the analysis.")
             return
 
+        # set the patient id in the shared config
+        self.shared_config.patient_id.value = self.patient_id
         # Create patient directory
         patient_directory = os.path.join(directory, self.patient_id)
         try:
-            os.makedirs(patient_directory, exist_ok=True)
+            os.makedirs(patient_directory, exist_ok=False)
+        except FileExistsError:
+            QMessageBox.warning(self, "Patient ID Exists", f"A directory for patient ID '{self.patient_id}' already exists. Please use a different ID.")
+            return
         except OSError as e:
             QMessageBox.critical(self, "Error", f"Failed to create patient directory: {e}")
             return

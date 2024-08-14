@@ -16,7 +16,9 @@ try:
     from google.cloud import storage
     from google.oauth2 import service_account
     print("Google Cloud Storage SDK is available")
+    gcloud_available = True
 except:
+    gcloud_available = False
     pass
 
 import os
@@ -236,6 +238,11 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
         logger = shared_config.setup_process_logger()
 
         try:
+            if gcloud_available:
+                # add patient id to the queue
+                patient_queue_lock.acquire()
+                shared_memory_patient_queue.append(shared_config.patient_id.value)
+                patient_queue_lock.release()
 
             logger.info("Running autofocus")
             microscope.set_channel("BF LED matrix left half")
@@ -669,19 +676,19 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
 import random
 def cloud_upload_process(shutdown_event: mp.Event, start_event: mp.Event):
     # Check for Google Cloud credentials
-    if 'GOOGLE_APPLICATION_CREDENTIALS' not in os.environ:
+    if 'SERVICE_ACCOUNT_JSON_KEY' not in os.environ:
         print("Error: Google Cloud credentials not found in environment variables.")
         return
 
     # Check for bucket name
-    bucket_name = os.environ.get('GOOGLE_CLOUD_BUCKET')
+    bucket_name = os.environ.get('BUCKET_NAME')
     if not bucket_name:
         print("Error: Google Cloud bucket name not found in environment variables.")
         return
 
     # Initialize Google Cloud client
     credentials = service_account.Credentials.from_service_account_file(
-        os.environ['GOOGLE_APPLICATION_CREDENTIALS'])
+        os.environ['SERVICE_ACCOUNT_JSON_KEY'])
     client = storage.Client(credentials=credentials)
     bucket = client.bucket(bucket_name)
 
@@ -694,12 +701,13 @@ def cloud_upload_process(shutdown_event: mp.Event, start_event: mp.Event):
                 patient_id = None
 
         if patient_id:
-            patient_path = os.path.join(shared_config.get_path(), patient_id)
+            patient_path = shared_config.get_path()
             stats_file = os.path.join(patient_path, 'stats.txt')
-            rbc_count_file = os.path.join(patient_path, 'rbc_count.txt')
+            rbc_count_file = os.path.join(patient_path, 'rbc_counts.csv')
 
             # Wait for both files to exist
             while not (os.path.exists(stats_file) and os.path.exists(rbc_count_file)):
+                print(f"Waiting for patient {patient_id} to be ready \n checking {stats_file} and {rbc_count_file}")
                 if shutdown_event.is_set():
                     return
                 time.sleep(3)  # Check every 5 seconds
@@ -710,19 +718,26 @@ def cloud_upload_process(shutdown_event: mp.Event, start_event: mp.Event):
                 # Upload all cropped images, spot lists, scores, and txt files
                 for root, _, files in os.walk(patient_path):
                     for file in files:
-                        if file.endswith(('.npy', '.txt')):
+                        if file.endswith(('.npy', '.txt','.csv')):
                             local_path = os.path.join(root, file)
                             cloud_path = f"{patient_id}/{file}"
                             blob = bucket.blob(cloud_path)
                             blob.upload_from_filename(local_path)
             # Upload all DPC and fluorescent images
-                fov_files = [f for f in os.listdir(patient_path) if f.endswith('_dpc.npy') or f.endswith('_fluorescent.npy')]
+                fov_ids = [f.replace('_dpc.bmp', '') for f in os.listdir(patient_path) if f.endswith('_dpc.bmp')]
+                print(f"There will be {len(fov_ids)} files uploaded for patient {patient_id}")
                 # randomly select 10 files
- 
-                fov_files = random.sample(fov_files, 10)
-                for file in fov_files:
-                    local_path = os.path.join(patient_path, file)
-                    cloud_path = f"{patient_id}/{file}"
+                if len(fov_ids) > 5:
+                    fov_ids = random.sample(fov_ids, 5)
+                for fov_id in fov_ids:
+                    # for dpc image
+                    local_path = os.path.join(patient_path, f"{fov_id}_dpc.bmp")
+                    cloud_path = f"{patient_id}/{fov_id}_dpc.bmp"
+                    blob = bucket.blob(cloud_path)
+                    blob.upload_from_filename(local_path)
+                    # for fluorescent image
+                    local_path = os.path.join(patient_path, f"{fov_id}_fluorescent.bmp")
+                    cloud_path = f"{patient_id}/{fov_id}_fluorescent.bmp"
                     blob = bucket.blob(cloud_path)
                     blob.upload_from_filename(local_path)
 
@@ -730,9 +745,6 @@ def cloud_upload_process(shutdown_event: mp.Event, start_event: mp.Event):
 
             except Exception as e:
                 print(f"Error uploading data for patient {patient_id}: {str(e)}")
-                continue
-
-
             # Remove the patient ID from the queue
             with patient_queue_lock:
                 shared_memory_patient_queue.pop(0)
@@ -837,7 +849,11 @@ if __name__ == "__main__":
     classification_thread.start()
     segmentation_thread.start()
 
-    #logger = shared_config.setup_process_logger()
+    # check if the google tools are imported, if so launch the cloud upload process
+    if gcloud_available:
+        # process
+        cloud_upload_process = mp.Process(target=cloud_upload_process, args=(shutdown_event, start_event), name="Cloud Upload Process")
+        cloud_upload_process.start()
 
     try:
         while not shutdown_event.is_set():
@@ -864,6 +880,9 @@ if __name__ == "__main__":
             print("Force terminating UI process")
             ui_process.terminate()
         #logger.info("All processes have been shut down.")
+        if cloud_upload_process.is_alive():
+            cloud_upload_process.join(timeout=1)
+            cloud_upload_process.terminate()
         print("All processes have been shut down.")
         if classification_thread.is_alive() or segmentation_thread.is_alive():
             #logger.info("Force terminating classification and segmentation threads")

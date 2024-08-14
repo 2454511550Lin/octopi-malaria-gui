@@ -405,6 +405,8 @@ class SharedConfig:
         self.nx = self.manager.Value('i', 0)  # 'i' for integer
         self.ny = self.manager.Value('i', 0)  # 'i' for integer
 
+        self.patient_id = self.manager.Value('s', '')
+
         # for live viewing
         self.is_live_view_active = self.manager.Value('b', False)
         self.live_channel_selected = self.manager.Value('i', 0)
