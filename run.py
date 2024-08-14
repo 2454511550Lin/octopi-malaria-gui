@@ -702,31 +702,36 @@ def cloud_upload_process(shutdown_event: mp.Event, start_event: mp.Event):
             while not (os.path.exists(stats_file) and os.path.exists(rbc_count_file)):
                 if shutdown_event.is_set():
                     return
-                time.sleep(5)  # Check every 5 seconds
+                time.sleep(3)  # Check every 5 seconds
 
             print(f"Uploading data for patient {patient_id}")
 
-            # Upload all cropped images, spot lists, scores, and txt files
-            for root, _, files in os.walk(patient_path):
-                for file in files:
-                    if file.endswith(('.npy', '.txt')):
-                        local_path = os.path.join(root, file)
-                        cloud_path = f"{patient_id}/{file}"
-                        blob = bucket.blob(cloud_path)
-                        blob.upload_from_filename(local_path)
-
+            try:
+                # Upload all cropped images, spot lists, scores, and txt files
+                for root, _, files in os.walk(patient_path):
+                    for file in files:
+                        if file.endswith(('.npy', '.txt')):
+                            local_path = os.path.join(root, file)
+                            cloud_path = f"{patient_id}/{file}"
+                            blob = bucket.blob(cloud_path)
+                            blob.upload_from_filename(local_path)
             # Upload all DPC and fluorescent images
-            fov_files = [f for f in os.listdir(patient_path) if f.endswith('_dpc.npy') or f.endswith('_fluorescent.npy')]
-            # randomly select 10 files
+                fov_files = [f for f in os.listdir(patient_path) if f.endswith('_dpc.npy') or f.endswith('_fluorescent.npy')]
+                # randomly select 10 files
  
-            fov_files = random.sample(fov_files, 10)
-            for file in fov_files:
-                local_path = os.path.join(patient_path, file)
-                cloud_path = f"{patient_id}/{file}"
-                blob = bucket.blob(cloud_path)
-                blob.upload_from_filename(local_path)
+                fov_files = random.sample(fov_files, 10)
+                for file in fov_files:
+                    local_path = os.path.join(patient_path, file)
+                    cloud_path = f"{patient_id}/{file}"
+                    blob = bucket.blob(cloud_path)
+                    blob.upload_from_filename(local_path)
 
-            print(f"Finished uploading data for patient {patient_id}")
+                print(f"Finished uploading data for patient {patient_id}")
+
+            except Exception as e:
+                print(f"Error uploading data for patient {patient_id}: {str(e)}")
+                continue
+
 
             # Remove the patient ID from the queue
             with patient_queue_lock:
