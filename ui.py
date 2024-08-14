@@ -375,13 +375,25 @@ class ImageAnalysisUI(QMainWindow):
         self.live_button.clicked.connect(self.toggle_live_view)
         left_layout.addWidget(self.live_button, alignment=Qt.AlignTop | Qt.AlignLeft)
 
+         # Add live position display
+        self.live_position_label = QLabel("Position: X: 0, Y: 0, Z: 0")
+        self.live_position_label.setStyleSheet("""
+            font-size: 18px;
+            color: #2C3E50;
+            padding: 5px;
+            background-color: #ECF0F1;
+            border-radius: 3px;
+         """)
+        left_layout.addWidget(self.live_position_label, alignment=Qt.AlignTop | Qt.AlignLeft)
+ 
+        # Add left container to main layout
+        live_view_layout.addWidget(left_container)
+
         # add a button for auto focus calibration
         self.auto_focus_calibration_button = QPushButton("Auto-Focus Calibration")
         self.auto_focus_calibration_button.clicked.connect(self.auto_focus_calibration)
-        left_layout.addWidget(self.auto_focus_calibration_button, alignment=Qt.AlignTop| Qt.AlignLeft)
+        left_layout.addWidget(self.auto_focus_calibration_button)
 
-        # Add left container to main layout
-        live_view_layout.addWidget(left_container)
 
         # Live view graph
         self.live_view_graph = pg.GraphicsLayoutWidget()
@@ -402,6 +414,12 @@ class ImageAnalysisUI(QMainWindow):
         # Timer for updating live view
         self.live_view_timer = QTimer(self, interval=int(1.0 / self.shared_config.frame_rate.value * 1000))
         self.live_view_timer.timeout.connect(self.update_live_view)
+
+        # Timer for updating live position
+        self.live_position_timer = QTimer(self)
+        self.live_position_timer.timeout.connect(self.update_live_position)
+        self.live_position_timer.start(100)
+
         # a tab for settings
         settings_tab = QWidget()
         settings_layout = QVBoxLayout(settings_tab)
@@ -536,6 +554,17 @@ class ImageAnalysisUI(QMainWindow):
         # clear up the image
         self.live_view_image.clear()
         self.shared_config.is_live_view_active.value = False
+    
+    def update_live_view(self):
+        # Generate a random image
+        image = self.shared_config.get_live_view_image()
+        self.live_view_image.setImage(image)
+ 
+    def update_live_position(self):
+        x = self.shared_config.live_x.value
+        y = self.shared_config.live_y.value
+        z = self.shared_config.live_z.value
+        self.live_position_label.setText(f"Position: X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
 
     def update_live_view(self):
         # Generate a random image
@@ -592,6 +621,7 @@ class ImageAnalysisUI(QMainWindow):
         # Clear all caches and data
         self.image_cache.clear()
         self.fov_image_cache.clear()
+
         self.fov_data.clear()
         self.fov_image_data.clear()
 
