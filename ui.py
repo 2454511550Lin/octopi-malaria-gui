@@ -352,47 +352,47 @@ class ImageAnalysisUI(QMainWindow):
 
         self.tab_widget.addTab(self.cropped_tab, "Malaria Detection Report")
 
-        # A tab for live view
+                # A tab for live view
         live_view_tab = QWidget()
-        live_view_layout = QHBoxLayout(live_view_tab)  # Changed to QHBoxLayout
+        live_view_layout = QHBoxLayout(live_view_tab)
 
-        # Left side container for channel selection and LIVE button
+        # Left side container for controls
         left_container = QWidget()
         left_layout = QVBoxLayout(left_container)
 
         # Channel selection
         channel_group = QGroupBox("Channel Selection")
-        channel_layout = QHBoxLayout(channel_group)
+        channel_layout = QVBoxLayout(channel_group)
         self.channel_combo = QComboBox()
         self.load_channels()
-        # create a signal when the channel is changed
         self.channel_combo.currentIndexChanged.connect(self.switch_channel)
-        channel_layout.addWidget(self.channel_combo, alignment=Qt.AlignTop | Qt.AlignLeft)
+        channel_layout.addWidget(self.channel_combo)
         left_layout.addWidget(channel_group)
 
-        # LIVE button
+        # Control buttons
         self.live_button = QPushButton("LIVE")
         self.live_button.clicked.connect(self.toggle_live_view)
-        left_layout.addWidget(self.live_button, alignment=Qt.AlignTop | Qt.AlignLeft)
+        left_layout.addWidget(self.live_button)
 
-         # Add live position display
-        self.live_position_label = QLabel("Position: X: 0, Y: 0, Z: 0")
+        # Live position display
+        self.live_position_label = QLabel("X: 0, Y: 0, Z: 0")
         self.live_position_label.setStyleSheet("""
-            font-size: 18px;
             color: #2C3E50;
-            padding: 5px;
             background-color: #ECF0F1;
-            border-radius: 3px;
-         """)
-        left_layout.addWidget(self.live_position_label, alignment=Qt.AlignTop | Qt.AlignLeft)
- 
-        # Add left container to main layout
-        live_view_layout.addWidget(left_container)
-
-        # add a button for auto focus calibration
-        self.auto_focus_calibration_button = QPushButton("Auto-Focus Calibration")
+            border-radius: 5px;
+            padding: 5px;
+            margin: 5px;
+        """)
+        left_layout.addWidget(self.live_position_label)
+        
+        self.auto_focus_calibration_button = QPushButton("Auto Focus Calibration")
         self.auto_focus_calibration_button.clicked.connect(self.auto_focus_calibration)
         left_layout.addWidget(self.auto_focus_calibration_button)
+
+        # Add some stretch to push everything to the top
+        left_layout.addStretch(1)
+        # Add left container to main layout
+        live_view_layout.addWidget(left_container)
 
 
         # Live view graph
@@ -486,13 +486,18 @@ class ImageAnalysisUI(QMainWindow):
         self.shared_config.set_channel_selected(index)
     
     def auto_focus_calibration(self):
+        # if live is on, turn it off
+        if self.shared_config.is_live_view_active.value:
+            self.stop_live_view()
+
+        self.live_view_timer.start()
         self.shared_config.is_auto_focus_calibration.value = True
         # generate a window saying it is doing the calibration while shared_config.is_auto_focus_calibration.value == True
         self.calibration_dialog = AutoFocusDialog(self, title="Auto-focus calibration", message="The system is calibrating the auto-focus. Please wait...")
         # Start the timer before showing the dialog
         self.calibration_timer = QTimer(self)
         self.calibration_timer.timeout.connect(self.check_calibration_status)
-        self.calibration_timer.start(500)  # Check every 500 ms
+        self.calibration_timer.start(1000)  # Check every 500 ms
 
         self.calibration_dialog.show()
         QApplication.processEvents() 
@@ -526,6 +531,10 @@ class ImageAnalysisUI(QMainWindow):
             self.logger.error("channel_configurations.xml file not found")
 
     def toggle_live_view(self):
+        # check if scanning is in progress, if so show a window saying that scanning is in progress
+        if self.start_button.text() == "Scanning in progress":
+            QMessageBox.warning(self, "Warning", "Scanning is in progress. Please wait until scanning is complete before starting live view. (By clicking New Patient)", QMessageBox.Ok)
+            return
         if self.shared_config.is_live_view_active.value:
             self.stop_live_view()
         else:
@@ -564,12 +573,8 @@ class ImageAnalysisUI(QMainWindow):
         x = self.shared_config.live_x.value
         y = self.shared_config.live_y.value
         z = self.shared_config.live_z.value
-        self.live_position_label.setText(f"Position: X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
+        self.live_position_label.setText(f"X: {x:.3f}, Y: {y:.3f}, Z: {z:.3f}")
 
-    def update_live_view(self):
-        # Generate a random image
-        image = self.shared_config.get_live_view_image()
-        self.live_view_image.setImage(image)
 
     def move_to_loading_position(self):
         if self.loading_position_button.text() == "To Loading Position":
@@ -677,7 +682,7 @@ class ImageAnalysisUI(QMainWindow):
             for img, score in zip(images, scores):
                 img_hash = hash(img.tobytes())
                 if img_hash not in self.image_cache:
-                    overlay_img = numpy2png(img, resize_factor=4)
+                    overlay_img = numpy2png(img, resize_factor=None)
                     if overlay_img is not None:
                         qimg = self.create_qimage(overlay_img)
                         self.image_cache[img_hash] = (qimg, score)
@@ -936,11 +941,12 @@ class ImageAnalysisUI(QMainWindow):
     def check_calibration_status(self):
         #print(f"Checking auto-focus status. Indicator: {self.shared_config.auto_focus_indicator.value}")
         QApplication.processEvents()  # Force processing of events
-        if self.shared_config.is_auto_focus_calibration.value:
+        if not self.shared_config.is_auto_focus_calibration.value:
             print("Auto-focus calibration complete. Closing dialog.")
             self.calibration_timer.stop()
             self.calibration_dialog.close()
             self.calibration_dialog = None
+            self.live_view_timer.stop()
             QApplication.processEvents()  
 
     def load_patient(self):

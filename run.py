@@ -223,7 +223,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
             elif shared_config.is_auto_focus_calibration.value:
                 # run the calibration
                 microscope.set_channel("BF LED matrix left half")
-                z_focus_init, _ = microscope.run_autofocus(step_size_mm = [0.01, 0.0015], start_z_mm = 6.0, end_z_mm = 7.0)
+                z_focus_init, _ = microscope.run_autofocus(step_size_mm = [0.01, 0.0015], start_z_mm = 5.5, end_z_mm = 7.0, shared_config=shared_config)
                 # with this z_focus_init, we know that the autofocus searching range is 0.1 mm
                 INIT_FOCUS_RANGE_START_MM = z_focus_init - 0.05
                 INIT_FOCUS_RANGE_END_MM = z_focus_init + 0.05
@@ -365,6 +365,20 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
     
                 dpc_queue.put(fov_id)
                 fluorescent_queue.put(fov_id)
+
+                num_fovs_acquisition = len(shared_memory_acquisition)
+                num_fovs_dpc = len(shared_memory_dpc)
+                num_fovs_segmentation = len(shared_memory_segmentation)
+                num_fovs_fluorescent = len(shared_memory_fluorescent)
+
+                # if any of those number is greater than 3, sleep for 0.5 seconds
+                if num_fovs_acquisition > 3 or num_fovs_dpc > 3 or num_fovs_segmentation > 3 or num_fovs_fluorescent > 3:
+                    logger.info(f"Number of fovs in shared memory is greater than 3, sleeping for 0.5s")
+                    logger.info(f"Number of fovs in shared_memory_acquisition: {num_fovs_acquisition}")
+                    logger.info(f"Number of fovs in shared_memory_dpc: {num_fovs_dpc}")
+                    logger.info(f"Number of fovs in shared_memory_segmentation: {num_fovs_segmentation}")
+                    logger.info(f"Number of fovs in shared_memory_fluorescent: {num_fovs_fluorescent}")
+                    time.sleep(1)
 
                 if i<=3:
                     time.sleep(0.5)

@@ -15,6 +15,8 @@ from qtpy.QtCore import *
 from qtpy.QtWidgets import *
 from qtpy.QtGui import *
 
+from simulation import crop_image
+
 class Microscope(QObject):
 
     def __init__(self, is_simulation=False):
@@ -365,8 +367,8 @@ class Microscope(QObject):
             self.slidePositionController.objective_retracted = False
             
         '''
-
-    def run_autofocus(self, step_size_mm = [0.1, 0.01, 0.0015], start_z_mm = 3, end_z_mm = 7):
+    
+    def run_autofocus(self, step_size_mm = [0.1, 0.01, 0.0015], start_z_mm = 3, end_z_mm = 7,shared_config=None):
         def focus_search(start_z_mm, end_z_mm, step_size_mm):
             z_positions = np.arange(start_z_mm, end_z_mm + step_size_mm/2, step_size_mm)
             focus_measures = []
@@ -374,6 +376,10 @@ class Microscope(QObject):
             for z in z_positions:
                 self.move_z_to(z)
                 image = self.acquire_image()
+                if shared_config is not None:
+                    shared_config.live_z.value = z
+                    shared_config.set_live_view_image(crop_image(image))
+
                 focus_measure = utils.calculate_focus_measure(image, FOCUS_MEASURE_OPERATOR)
                 focus_measures.append(focus_measure)
             
