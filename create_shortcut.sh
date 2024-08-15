@@ -6,7 +6,8 @@ CURRENT_DIR=$(pwd)
 # Create the shortcut script
 cat << EOF > $CURRENT_DIR/go.sh
 #!/bin/bash
-source ~/.bashrc
+export BUCKET_NAME="\$(grep BUCKET_NAME ~/.bashrc | cut -d '=' -f2 | tr -d '"')"
+export SERVICE_ACCOUNT_JSON_KEY="\$(grep SERVICE_ACCOUNT_JSON_KEY ~/.bashrc | cut -d '=' -f2 | tr -d '"')"
 # Change to the script directory
 cd $CURRENT_DIR
 
