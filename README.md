@@ -46,7 +46,7 @@ chmod +x setup_22.04.sh
 ./setup_22.04.sh
 ```
 
-`SciPy` has to be `1.12.0`, otherwise spot detection could have some issues.
+`SciPy` has to be `1.12.0`, otherwise spot detection could have some issues. Which can be installed by `pip install scipy==1.12.0`
 
 ### CUDA / Driver
 
