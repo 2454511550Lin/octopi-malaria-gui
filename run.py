@@ -584,18 +584,23 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                 if len(spot_list) > 0:
 
                     filtered_spots = seg_spot_filter_one_fov(segmentation_map, spot_list)
-                
-                    dpc_image = shared_memory_dpc[fov_id]['dpc_image']
-                    fluorescence_image = shared_memory_acquisition[fov_id]['fluorescent'].astype(np.float16)/255
-                
-                    cropped_images = get_spot_images_from_fov(fluorescence_image,dpc_image,filtered_spots,r=15)
-                    cropped_images = cropped_images.transpose(0, 3, 1, 2)
 
-                    scores1 = run_model(model1,DEVICE,cropped_images,1024)[:,1]
-                    scores2 = run_model(model2,DEVICE,cropped_images,1024)[:,1]
+                    if len(filtered_spots) > 0:
+                        dpc_image = shared_memory_dpc[fov_id]['dpc_image']
+                        fluorescence_image = shared_memory_acquisition[fov_id]['fluorescent'].astype(np.float16)/255
+                
+                        cropped_images = get_spot_images_from_fov(fluorescence_image,dpc_image,filtered_spots,r=15)
+                        cropped_images = cropped_images.transpose(0, 3, 1, 2)
 
-                    # use whichever smaller as the final score
-                    scores = np.minimum(scores1,scores2)
+                        scores1 = run_model(model1,DEVICE,cropped_images,1024)[:,1]
+                        scores2 = run_model(model2,DEVICE,cropped_images,1024)[:,1]
+
+                        # use whichever smaller as the final score
+                        scores = np.minimum(scores1,scores2)
+                    else:
+                        filtered_spots = np.array([])
+                        scores = np.array([])
+                        cropped_images = np.array([])
                 else:
                     filtered_spots = np.array([])
                     scores = np.array([])
