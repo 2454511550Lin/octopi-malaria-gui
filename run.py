@@ -386,7 +386,7 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                     logger.info(f"Number of fovs in shared_memory_dpc: {num_fovs_dpc}")
                     logger.info(f"Number of fovs in shared_memory_segmentation: {num_fovs_segmentation}")
                     logger.info(f"Number of fovs in shared_memory_fluorescent: {num_fovs_fluorescent}")
-                    time.sleep(1)
+                    time.sleep(3)
 
                 if i<=3:
                     time.sleep(0.5)
