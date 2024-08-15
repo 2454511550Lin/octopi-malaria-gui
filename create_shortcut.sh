@@ -6,7 +6,7 @@ CURRENT_DIR=$(pwd)
 # Create the shortcut script
 cat << EOF > $CURRENT_DIR/go.sh
 #!/bin/bash
-
+source ~/.bashrc
 # Change to the script directory
 cd $CURRENT_DIR
 
