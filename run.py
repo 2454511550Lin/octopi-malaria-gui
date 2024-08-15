@@ -189,6 +189,8 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
     
     live_channel_index = -1
 
+    done = False
+
     while not shutdown_event.is_set():
 
         # check if to loading or to scanning position
@@ -212,8 +214,14 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                     # get the value from manager.list
                     microscope.set_channel(shared_config.live_channels_list[live_channel_index])
 
-                image = microscope.acquire_image()                
-                shared_config.set_live_view_image(crop_image(image))
+                image = microscope.acquire_image()     
+                if live_channel_index != 1: # first one is the fluorescent as defined in the config file
+                    image = crop_image(image)[:,:,1]
+                else:
+                    image = crop_image(image)
+
+                shared_config.set_live_view_image(image)
+            
                 # update the live x and y
                 shared_config.live_x.value = microscope.get_x()
                 shared_config.live_y.value = microscope.get_y()
@@ -389,6 +397,8 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
             continue
 
         while start_event.is_set() and not shutdown_event.is_set():
+            # change the channel to whatever is in the config file
+            microscope.set_channel(shared_config.live_channels_list[live_channel_index])
             time.sleep(1)
 
     microscope.close()
@@ -896,7 +906,8 @@ if __name__ == "__main__":
             ui_process.terminate()
         #logger.info("All processes have been shut down.")
         if cloud_upload_process.is_alive():
-            cloud_upload_process.join(timeout=10)
+            print("Waiting for cloud upload process to finish...")
+            cloud_upload_process.join(timeout=1000)
             cloud_upload_process.terminate()
         print("All processes have been shut down.")
         if classification_thread.is_alive() or segmentation_thread.is_alive():
