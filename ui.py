@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QSplitter, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QMessageBox, QStyleFactory, QFileDialog,
-    QComboBox, QCheckBox, QGroupBox, QGridLayout,QSpinBox, QFrame, QDialog
+    QComboBox, QCheckBox, QGroupBox, QGridLayout,QSpinBox, QFrame, QDialog, QDoubleSpinBox
 )
 from PyQt5.QtGui import QImage, QColor, QFont
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
@@ -352,7 +352,7 @@ class ImageAnalysisUI(QMainWindow):
 
         self.tab_widget.addTab(self.cropped_tab, "Malaria Detection Report")
 
-                # A tab for live view
+        # A tab for live view
         live_view_tab = QWidget()
         live_view_layout = QHBoxLayout(live_view_tab)
 
@@ -476,10 +476,29 @@ class ImageAnalysisUI(QMainWindow):
         position_layout.setColumnStretch(1, 5)
         settings_layout.addWidget(position_group, alignment=Qt.AlignTop | Qt.AlignLeft)
 
+        # Add Minimum Score Threshold input
+        threshold_group = QGroupBox("Detection Threshold")
+        threshold_layout = QHBoxLayout(threshold_group)
+        threshold_layout.addWidget(QLabel("Minimum Score Threshold:"))
+        self.threshold_input = QDoubleSpinBox()
+        self.threshold_input.setRange(0.0, 1.0)
+        self.threshold_input.setSingleStep(0.01)
+        self.threshold_input.setValue(MINIMUM_SCORE_THRESHOLD)
+        self.threshold_input.setDecimals(2)
+        self.threshold_input.valueChanged.connect(self.update_threshold)
+        threshold_layout.addWidget(self.threshold_input)
+        settings_layout.addWidget(threshold_group, alignment=Qt.AlignTop | Qt.AlignLeft)
+
         settings_layout.addStretch(1)
 
         settings_tab.setLayout(settings_layout)
         self.tab_widget.addTab(settings_tab, "Settings")
+
+    def update_threshold(self, value):
+        global MINIMUM_SCORE_THRESHOLD
+        MINIMUM_SCORE_THRESHOLD = value
+
+
 
     def switch_channel(self):
         index = self.channel_combo.currentIndex()
@@ -835,7 +854,7 @@ class ImageAnalysisUI(QMainWindow):
         # then direcly call numpy2png
         img = np.stack([fluorescent_image[:,:,0], fluorescent_image[:,:,1], fluorescent_image[:,:,2], dpc_image], axis=0)
         #print(f"Overlay image shape: {img.shape} and dtype {img.dtype}")
-        img =  numpy2png(img,resize_factor=0.5)
+        img =  numpy2png(img,resize_factor=None)
         
         return img
 
