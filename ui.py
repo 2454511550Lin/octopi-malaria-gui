@@ -886,6 +886,8 @@ class ImageAnalysisUI(QMainWindow):
             return
 
         # set the patient id in the shared config
+        # add a timestamp to the patient id
+        self.patient_id = f"{self.patient_id}_{time.strftime('%Y%m%d_%H%M%S')}"
         self.shared_config.patient_id.value = self.patient_id
         # Create patient directory
         patient_directory = os.path.join(directory, self.patient_id)
