@@ -214,9 +214,14 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                     # get the value from manager.list
                     microscope.set_channel(shared_config.live_channels_list[live_channel_index])
 
-                image = microscope.acquire_image()     
+                image = microscope.acquire_image()                   
+                if not done:
+                    # save the raw image to the disk
+                    cv2.imwrite(f'raw_image.png', image) 
+                    done = True
+
                 if live_channel_index != 1: # first one is the fluorescent as defined in the config file
-                    image = crop_image(image)[:,:,1]
+                    image = crop_image(image)
                 else:
                     image = crop_image(image)
 
@@ -380,13 +385,19 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                 num_fovs_fluorescent = len(shared_memory_fluorescent)
 
                 # if any of those number is greater than 3, sleep for 0.5 seconds
-                if num_fovs_acquisition > 3 or num_fovs_dpc > 3 or num_fovs_segmentation > 3 or num_fovs_fluorescent > 3:
-                    logger.info(f"Number of fovs in shared memory is greater than 3, sleeping for 0.5s")
-                    logger.info(f"Number of fovs in shared_memory_acquisition: {num_fovs_acquisition}")
-                    logger.info(f"Number of fovs in shared_memory_dpc: {num_fovs_dpc}")
-                    logger.info(f"Number of fovs in shared_memory_segmentation: {num_fovs_segmentation}")
-                    logger.info(f"Number of fovs in shared_memory_fluorescent: {num_fovs_fluorescent}")
+                waiting_time = 0
+                while num_fovs_acquisition > 3 or num_fovs_dpc > 3 or num_fovs_segmentation > 3 or num_fovs_fluorescent > 3:
+                    logger.info(f"Traffic Jam: fovs in shared memory is greater than 3, sleeping for 0.5s")
+                    logger.info(f"Traffic Jam: fovs in shared_memory_acquisition: {num_fovs_acquisition}")
+                    logger.info(f"Traffic Jam: fovs in shared_memory_dpc: {num_fovs_dpc}")
+                    logger.info(f"Traffic Jam: fovs in shared_memory_segmentation: {num_fovs_segmentation}")
+                    logger.info(f"Traffic Jam: fovs in shared_memory_fluorescent: {num_fovs_fluorescent}")
+                    waiting_time += 1
                     time.sleep(3)
+                    if waiting_time > 10:
+                        logger.info(f"Traffic Jam: waiting for 10 times, break")
+                        print("Processing Jam: waiting for 10 times, break")
+                        break
 
                 if i<=3:
                     time.sleep(0.5)
