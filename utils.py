@@ -230,7 +230,7 @@ def process_spots(I_background_removed,I_raw,spot_list,i,j,k,settings,I_mask=Non
 	return spot_list, spot_data_pd
 
 
-def seg_spot_filter_one_fov(mask, spots, crop_offset_x=100, crop_offset_y=100, overlap_threshold=6/9):
+def seg_spot_filter_one_fov(mask, spots, crop_offset_x=100, crop_offset_y=100, overlap_threshold=1/9):
     
     # Erode the mask
     kernel = np.ones((3, 3), np.uint8)
@@ -293,6 +293,42 @@ def generate_dpc(I1, I2, use_gpu=False):
     
     return I_dpc
 
+def draw_spot_bounding_boxes(I_fluorescence, I_dpc, spot_list1, spot_list2, 
+                             box_color1=(0, 0, 255), box_color2=(0, 255, 0), r=15):
+    # Ensure I_dpc is a single channel image
+    if len(I_dpc.shape) == 3:
+        I_dpc = I_dpc[:,:,1]
+    
+    # Normalize I_fluorescence and I_dpc
+    #assert I_fluorescence.dtype == np.int8
+    #assert I_dpc.dtype == np.float16
+
+    print("assertion passed")
+    
+    # Combine fluorescence (0.67) and DPC images (0.33)
+    I_fluorescence_fp = I_fluorescence.astype(np.float16)/255
+    # dpc to three channels
+    I_dpc_fp = np.dstack([I_dpc,I_dpc,I_dpc])
+    I_combined = I_fluorescence_fp*0.67 + I_dpc_fp*0.33
+    I_combined = (I_combined*255).astype(np.uint8)
+    
+    # Draw bounding boxes
+    for spot in spot_list1:
+        x, y = int(spot[0]), int(spot[1])
+        x1, y1 = max(0, x - r), max(0, y - r)
+        x2, y2 = min(I_combined.shape[1] - 1, x + r), min(I_combined.shape[0] - 1, y + r)
+        
+        # Draw the bounding box
+        cv2.rectangle(I_combined, (x1, y1), (x2, y2), box_color1, 1)
+
+    for spot in spot_list2:
+        x, y = int(spot[0]), int(spot[1])
+        x1, y1 = max(0, x - r), max(0, y - r)
+        x2, y2 = min(I_combined.shape[1] - 1, x + r), min(I_combined.shape[0] - 1, y + r)
+        cv2.rectangle(I_combined, (x1, y1), (x2, y2), box_color2, 1)
+    
+    return I_combined
+
 def get_spot_images_from_fov(I_fluorescence,I_dpc,spot_list,r=15):
     if(len(I_dpc.shape)==3):
         I_dpc = I_dpc[:,:,1]
@@ -330,6 +366,7 @@ def get_spot_images_from_fov(I_fluorescence,I_dpc,spot_list,r=15):
         return None
     else:
         return I
+    
 import imageio
 import numpy as np
 import cv2
@@ -407,6 +444,8 @@ class SharedConfig:
 
         self.patient_id = self.manager.Value('s', '')
 
+        self.finished_scanning = self.manager.Value('b', False)
+
         # for live viewing
         self.is_live_view_active = self.manager.Value('b', False)
         self.live_channel_selected = self.manager.Value('i', 0)
@@ -420,7 +459,7 @@ class SharedConfig:
         # indicator for auto-focusing
         self.auto_focus_indicator = self.manager.Value('b', False)
         
-        self.IMAGE_SHAPE = (2800, 2800,3)
+        self.IMAGE_SHAPE = (2800,2800,3)
         self.IMAGE_SIZE = self.IMAGE_SHAPE[0] * self.IMAGE_SHAPE[1] * self.IMAGE_SHAPE[2]
         self.live_view_image_array = mp.RawArray('f', self.IMAGE_SIZE)
         self.live_view_image_lock = mp.Lock()
@@ -460,6 +499,7 @@ class SharedConfig:
         self.to_scanning.value = False
 
     def set_live_view_image(self, np_array):
+        
         if np_array.shape != self.IMAGE_SHAPE:
             # if only the first two dimension match
             if np_array.shape[:2] == self.IMAGE_SHAPE[:2]:
