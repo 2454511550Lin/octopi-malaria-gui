@@ -721,13 +721,13 @@ def saving_process(input_queue: mp.Queue, output: mp.Queue,shutdown_event: mp.Ev
                     # save the overlay image with bounding boxes
                     filename = os.path.join(save_path, f"{fov_id}_overlay_bb.bmp")
                     fluorescent_image = shared_memory_acquisition[fov_id]['fluorescent']
-                    print("fluorescent_image",fluorescent_image.dtype)
+                    #print("fluorescent_image",fluorescent_image.dtype)
                     dpc_image = shared_memory_dpc[fov_id]['dpc_image']
-                    print("dpc_image",dpc_image.dtype)
+                    #print("dpc_image",dpc_image.dtype)
                     filtered_spots = shared_memory_classification[fov_id]['filtered_spots']
                     spot_list = shared_memory_classification[fov_id]['spot_list']
-                    I_combined = draw_spot_bounding_boxes(np.array(fluorescent_image), np.array(dpc_image), spot_list, filtered_spots)
-                    print("bounding box saving to ",filename)
+                    I_combined = draw_spot_bounding_boxes(np.array(fluorescent_image), np.array(dpc_image), spot_list, filtered_spots,spot_list2_scores = scores)
+                    #print("bounding box saving to ",filename)
                     cv2.imwrite(filename, I_combined)
 
                     temp_dict = shared_memory_final[fov_id]

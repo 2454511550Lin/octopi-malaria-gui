@@ -230,7 +230,7 @@ def process_spots(I_background_removed,I_raw,spot_list,i,j,k,settings,I_mask=Non
 	return spot_list, spot_data_pd
 
 
-def seg_spot_filter_one_fov(mask, spots, crop_offset_x=100, crop_offset_y=100, overlap_threshold=1/9):
+def seg_spot_filter_one_fov(mask, spots, crop_offset_x=0, crop_offset_y=0, overlap_threshold=6/9):
     
     # Erode the mask
     kernel = np.ones((3, 3), np.uint8)
@@ -293,8 +293,14 @@ def generate_dpc(I1, I2, use_gpu=False):
     
     return I_dpc
 
+def draw_bounding_box(image, spot, r, box_color):
+    x, y = int(spot[0]), int(spot[1])
+    x1, y1 = max(0, x - r), max(0, y - r)
+    x2, y2 = min(image.shape[1] - 1, x + r), min(image.shape[0] - 1, y + r)
+    cv2.rectangle(image, (x1, y1), (x2, y2), box_color, 1)
+
 def draw_spot_bounding_boxes(I_fluorescence, I_dpc, spot_list1, spot_list2, 
-                             box_color1=(0, 0, 255), box_color2=(0, 255, 0), r=15):
+                             box_color1=(0, 255, 0), box_color2=(0, 0, 255), r=15, spot_list2_scores=None):
     # Ensure I_dpc is a single channel image
     if len(I_dpc.shape) == 3:
         I_dpc = I_dpc[:,:,1]
@@ -312,21 +318,22 @@ def draw_spot_bounding_boxes(I_fluorescence, I_dpc, spot_list1, spot_list2,
     I_combined = I_fluorescence_fp*0.67 + I_dpc_fp*0.33
     I_combined = (I_combined*255).astype(np.uint8)
     
-    # Draw bounding boxes
+    # Draw bounding boxes for spot_list1
     for spot in spot_list1:
-        x, y = int(spot[0]), int(spot[1])
-        x1, y1 = max(0, x - r), max(0, y - r)
-        x2, y2 = min(I_combined.shape[1] - 1, x + r), min(I_combined.shape[0] - 1, y + r)
-        
-        # Draw the bounding box
-        cv2.rectangle(I_combined, (x1, y1), (x2, y2), box_color1, 1)
+        draw_bounding_box(I_combined, spot, r, box_color1)
 
+    # Draw bounding boxes for spot_list2
     for spot in spot_list2:
-        x, y = int(spot[0]), int(spot[1])
-        x1, y1 = max(0, x - r), max(0, y - r)
-        x2, y2 = min(I_combined.shape[1] - 1, x + r), min(I_combined.shape[0] - 1, y + r)
-        cv2.rectangle(I_combined, (x1, y1), (x2, y2), box_color2, 1)
-    
+        draw_bounding_box(I_combined, spot, r, box_color2)
+
+    if spot_list2_scores is not None:
+        for spot,score in zip(spot_list2,spot_list2_scores):
+            # color text of score red if score is greater than 0.31 otherwise blue
+            if score > 0.31:
+                cv2.putText(I_combined, f"{score:.2f}", (int(spot[0])+r, int(spot[1])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+            else:
+                cv2.putText(I_combined, f"{score:.2f}", (int(spot[0])+r, int(spot[1])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+
     return I_combined
 
 def get_spot_images_from_fov(I_fluorescence,I_dpc,spot_list,r=15):
