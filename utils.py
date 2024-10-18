@@ -308,8 +308,6 @@ def draw_spot_bounding_boxes(I_fluorescence, I_dpc, spot_list1, spot_list2,
     # Normalize I_fluorescence and I_dpc
     #assert I_fluorescence.dtype == np.int8
     #assert I_dpc.dtype == np.float16
-
-    print("assertion passed")
     
     # Combine fluorescence (0.67) and DPC images (0.33)
     I_fluorescence_fp = I_fluorescence.astype(np.float16)/255
