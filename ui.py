@@ -808,21 +808,23 @@ class ImageAnalysisUI(QMainWindow):
             self.current_fov_index = list(self.fov_image_cache.keys()).index(fov_id)
         else:
             try:
-                #filename = f"{self.shared_config.get_path()}/{fov_id}_overlay.npy"
-                #img_array = np.load(filename)
+                # check if the bounding box version of the images exist
+                bounding_box_path = f"{self.shared_config.get_path()}/{fov_id}_overlay_bb.bmp"
+                if not os.path.exists(bounding_box_path):
+                    if self.shared_config.SAVE_NPY.value:
+                        dpc = np.load(f"{self.shared_config.get_path()}/{fov_id}_dpc.npy")
+                        fluorescent = np.load(f"{self.shared_config.get_path()}/{fov_id}_fluorescent.npy")
+                    else:
+                        dpc = cv2.imread(f"{self.shared_config.get_path()}/{fov_id}_dpc.bmp", cv2.IMREAD_GRAYSCALE)
+                        fluorescent = cv2.imread(f"{self.shared_config.get_path()}/{fov_id}_fluorescent.bmp")
 
-                if self.shared_config.SAVE_NPY.value:
-                    dpc = np.load(f"{self.shared_config.get_path()}/{fov_id}_dpc.npy")
-                    fluorescent = np.load(f"{self.shared_config.get_path()}/{fov_id}_fluorescent.npy")
+                    img_array = self.create_overlay(dpc, fluorescent)
+
                 else:
-                    dpc = cv2.imread(f"{self.shared_config.get_path()}/{fov_id}_dpc.bmp", cv2.IMREAD_GRAYSCALE)
-                    fluorescent = cv2.imread(f"{self.shared_config.get_path()}/{fov_id}_fluorescent.bmp")
+                    img_array = cv2.imread(bounding_box_path)
+                    # flip r and b channels
+                    img_array = img_array[:,:,::-1]
 
-                #print(f"DPC shape: {dpc.shape} and dtype {dpc.dtype}")
-                #print(f"Fluorescent shape: {fluorescent.shape} and dtype {fluorescent.dtype}")
-
-                img_array = self.create_overlay(dpc, fluorescent)
-                #print(f"Loading fov {fov_id} with shape {img_array.shape} and dtype {img_array.dtype}")
                 self.fov_image_cache[fov_id] = img_array
                 # delete the oldest image
                 if len(self.fov_image_cache) > self.max_cache_size:
