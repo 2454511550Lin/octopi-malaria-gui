@@ -408,9 +408,6 @@ def image_acquisition(dpc_queue: mp.Queue, fluorescent_queue: mp.Queue,shutdown_
                         print("Processing Jam: waiting for 10 times, break")
                         break
 
-                if i<=3:
-                    time.sleep(0.5)
-
                 log_time(fov_id, "Image Acquisition", "end")
         except Exception as e:
             logger.error(f"Error in image acquisition: {e}")
@@ -498,7 +495,7 @@ def segmentation_process(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_
             continue
 
 from utils import remove_background, resize_image_cp, detect_spots, prune_blobs, settings, seg_spot_filter_one_fov
-MAX_SPOTS_THRESHOLD = 5000  # Maximum number of spots allowed
+MAX_SPOTS_THRESHOLD = 8000  # Maximum number of spots allowed
 
 def fluorescent_spot_detection(input_queue: mp.Queue, output_queue: mp.Queue,shutdown_event: mp.Event,start_event: mp.Event):
     
@@ -570,10 +567,10 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
     model1.load_state_dict(torch.load(CHECKPOINT1))
     model1.eval()
 
-    CHECKPOINT2 = './checkpoint/resnet18_en/version2/best.pt'
-    model2 = ResNet('resnet18').to(device=DEVICE)
-    model2.load_state_dict(torch.load(CHECKPOINT2))
-    model2.eval()
+    #CHECKPOINT2 = './checkpoint/resnet18_en/version2/best.pt'
+    #model2 = ResNet('resnet18').to(device=DEVICE)
+    #model2.load_state_dict(torch.load(CHECKPOINT2))
+    #model2.eval()
 
     while not shutdown_event.is_set():
         start_event.wait()
@@ -619,11 +616,11 @@ def classification_process(segmentation_queue: mp.Queue, fluorescent_queue: mp.Q
                         cropped_images = get_spot_images_from_fov(fluorescence_image,dpc_image,filtered_spots,r=15)
                         cropped_images = cropped_images.transpose(0, 3, 1, 2)
 
-                        scores1 = run_model(model1,DEVICE,cropped_images,1024)[:,1]
-                        scores2 = run_model(model2,DEVICE,cropped_images,1024)[:,1]
+                        scores = run_model(model1,DEVICE,cropped_images,1024)[:,1]
+                        #scores2 = run_model(model2,DEVICE,cropped_images,1024)[:,1]
 
                         # use whichever smaller as the final score
-                        scores = np.minimum(scores1,scores2)
+                        #scores = np.minimum(scores1,scores2)
                     else:
                         filtered_spots = np.array([])
                         scores = np.array([])
