@@ -8,7 +8,7 @@ and
 
 First time running:
 ```
-git clone https://github.com/2454511550Lin/octopi-malaria-gui.git
+git clone https://github.com/octopi-project/octopi-malaria-gui.git
 cd octopi-malaria-gui
 python3 run.py
 ```
